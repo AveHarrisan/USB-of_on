@@ -25,6 +25,17 @@ namespace USBofon
         private ToolStripMenuItem _miRename, _miHide, _miEnable, _miDisable;
         private bool _refreshing, _refreshPending;
 
+        private readonly Panel _updateBar = new Panel();
+        private readonly Label _updateText = new Label();
+        private readonly LinkLabel _updateNotes = new LinkLabel();
+        private readonly Button _updateButton = new Button();
+        private readonly ProgressBar _updateProgress = new ProgressBar();
+        private ToolStripButton _btnUpdate;
+        private readonly Timer _updateTimer = new Timer { Interval = 6 * 60 * 60 * 1000 };
+        private ReleaseInfo _release;
+        private bool _updating;
+        private AboutForm _about;
+
         public MainForm()
         {
             Text = "USB-of_on — USB-устройства";
@@ -34,6 +45,7 @@ namespace USBofon
             MinimumSize = new Size(700, 360);
             StartPosition = FormStartPosition.CenterScreen;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            Text += "  " + AppInfo.VersionText;
 
             BuildUi();
 
@@ -43,7 +55,11 @@ namespace USBofon
                 try { _store.Load(); }
                 catch (Exception ex) { ShowError("Не удалось прочитать сохранённые имена:\r\n" + _store.FilePath, ex); }
                 RefreshDevices();
+                Updater.Cleanup();
+                _ = CheckUpdates(false);
+                _updateTimer.Start();
             };
+            _updateTimer.Tick += (s, e) => { _ = CheckUpdates(false); };
         }
 
         private void BuildUi()
@@ -58,6 +74,25 @@ namespace USBofon
             {
                 btnRefresh, new ToolStripSeparator(), _btnRename, _btnHide, new ToolStripSeparator(), _btnEnable, _btnDisable,
             });
+
+            var btnAbout = new ToolStripButton("О программе", null, (s, e) => ShowAbout()) { Alignment = ToolStripItemAlignment.Right };
+            var btnSupport = new ToolStripDropDownButton("Поддержать") { Alignment = ToolStripItemAlignment.Right, ForeColor = Color.Firebrick };
+            foreach (var link in AppInfo.Support)
+            {
+                var url = link.Url;
+                btnSupport.DropDownItems.Add(new ToolStripMenuItem(link.Title + " — " + link.Hint,
+                    new Bitmap(Resources.Image(link.Image), new Size(16, 16)), (s, e) => AppInfo.Open(url)));
+            }
+            _btnUpdate = new ToolStripButton("Обновить", null, (s, e) => StartUpdate())
+            {
+                Alignment = ToolStripItemAlignment.Right,
+                Visible = false,
+                Font = new Font(toolbar.Font, FontStyle.Bold),
+                ForeColor = Color.SeaGreen,
+            };
+            toolbar.Items.AddRange(new ToolStripItem[] { btnAbout, btnSupport, _btnUpdate });
+
+            BuildUpdateBar();
 
             var filters = new FlowLayoutPanel
             {
@@ -118,6 +153,7 @@ namespace USBofon
 
             Controls.Add(_list);
             Controls.Add(filters);
+            Controls.Add(_updateBar);
             Controls.Add(toolbar);
             Controls.Add(statusStrip);
             KeyPreview = true;
@@ -126,6 +162,116 @@ namespace USBofon
                 if (e.KeyCode == Keys.F5) { RefreshDevices(); e.Handled = true; }
             };
             UpdateButtons();
+        }
+
+        private void BuildUpdateBar()
+        {
+            _updateBar.Dock = DockStyle.Top;
+            _updateBar.Height = 40;
+            _updateBar.BackColor = Color.FromArgb(232, 245, 233);
+            _updateBar.Padding = new Padding(10, 6, 10, 6);
+            _updateBar.Visible = false;
+
+            var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            _updateText.AutoSize = true;
+            _updateText.Margin = new Padding(0, 6, 12, 0);
+            _updateNotes.Text = "Что нового";
+            _updateNotes.AutoSize = true;
+            _updateNotes.Margin = new Padding(0, 6, 12, 0);
+            _updateNotes.LinkClicked += (s, e) => ShowNotes();
+            _updateButton.Text = "Обновить";
+            _updateButton.AutoSize = true;
+            _updateButton.Margin = new Padding(0, 0, 12, 0);
+            _updateButton.Click += (s, e) => StartUpdate();
+            _updateProgress.Width = 200;
+            _updateProgress.Margin = new Padding(0, 6, 0, 0);
+            _updateProgress.Visible = false;
+            flow.Controls.AddRange(new Control[] { _updateText, _updateNotes, _updateButton, _updateProgress });
+            _updateBar.Controls.Add(flow);
+        }
+
+        /// <summary>Проверка обновлений. При ручной проверке сообщаем и об отсутствии новой версии, и об ошибке.</summary>
+        public async Task CheckUpdates(bool manual)
+        {
+            if (_updating) return;
+            try
+            {
+                var release = await Updater.CheckAsync();
+                if (release != null)
+                {
+                    _release = release;
+                    _updateText.Text = $"Вышла версия {release.Version.ToString(3)} (у вас {AppInfo.VersionText}).";
+                    _updateNotes.Visible = !string.IsNullOrWhiteSpace(release.Notes);
+                    _btnUpdate.Text = "Обновить до " + release.Version.ToString(3);
+                    _btnUpdate.Visible = true;
+                    _updateBar.Visible = true;
+                    if (manual)
+                    {
+                        // Окно «О программе» модальное — закрываем его, а обновление начинаем уже после.
+                        _about?.Close();
+                        BeginInvoke(new Action(StartUpdate));
+                    }
+                }
+                else if (manual)
+                {
+                    MessageBox.Show(this, "У вас последняя версия: " + AppInfo.VersionText, Text,
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (manual) ShowError("Не удалось проверить обновления.", ex);
+            }
+        }
+
+        private void ShowNotes()
+        {
+            if (_release == null) return;
+            MessageBox.Show(this, "Версия " + _release.Version.ToString(3) + "\r\n\r\n" + _release.Notes.Trim(), "Что нового",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private async void StartUpdate()
+        {
+            if (_release == null || _updating) return;
+            if (MessageBox.Show(this,
+                    $"Обновить до версии {_release.Version.ToString(3)}?\r\n\r\nПрограмма закроется, установится новая версия и откроется снова. Имена и скрытые устройства сохранятся.",
+                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            _updating = true;
+            _updateBar.Visible = true;
+            _updateButton.Enabled = false;
+            _btnUpdate.Enabled = false;
+            _updateProgress.Value = 0;
+            _updateProgress.Visible = true;
+            _updateText.Text = "Скачивание обновления…";
+            try
+            {
+                var progress = new Progress<int>(p => _updateProgress.Value = Math.Max(0, Math.Min(100, p)));
+                var setup = await Updater.DownloadAsync(_release, progress, System.Threading.CancellationToken.None);
+                _updateText.Text = "Установка…";
+                Updater.RunInstaller(setup);
+                Close();
+            }
+            catch (Exception ex)
+            {
+                _updateText.Text = $"Вышла версия {_release.Version.ToString(3)} (у вас {AppInfo.VersionText}).";
+                _updateProgress.Visible = false;
+                _updateButton.Enabled = _btnUpdate.Enabled = true;
+                ShowError("Не удалось скачать обновление.", ex);
+            }
+            finally
+            {
+                _updating = false;
+            }
+        }
+
+        private void ShowAbout()
+        {
+            using (_about = new AboutForm(CheckUpdates))
+                _about.ShowDialog(this);
+            _about = null;
         }
 
         private void OnListKeyDown(object sender, KeyEventArgs e)
