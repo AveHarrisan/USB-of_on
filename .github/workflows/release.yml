@@ -1,0 +1,121 @@
+name: Выпуск
+
+# Выпуск делается сам, когда в src/USBofon/USBofon.csproj меняется <Version>:
+# на каждый пуш в main собираем программу и установщик, и если релиза
+# с такой версией ещё нет — выкладываем его. Программа увидит релиз и предложит обновиться.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'   # раз в сутки освежаем число загрузок
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - id: version
+        name: Прочитать версию
+        shell: pwsh
+        run: |
+          $v = ([xml](Get-Content src/USBofon/USBofon.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $v) { throw "В USBofon.csproj нет <Version>" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "Версия: $v"
+
+      - name: Собрать программу
+        run: dotnet build src/USBofon/USBofon.csproj -c Release
+
+      - name: Собрать установщик
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Q "/DAppVersion=${{ steps.version.outputs.version }}" installer\USB-of_on.iss
+          if ($LASTEXITCODE -ne 0) { throw "Установщик не собрался" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: USB-of_on-Setup-${{ steps.version.outputs.version }}
+          path: dist/USB-of_on-Setup.exe
+
+      - id: check
+        name: Решить, нужен ли выпуск
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "publish=false" >> $GITHUB_OUTPUT
+            echo "Релиз $TAG уже есть — версия не менялась, выкладывать нечего."
+          else
+            echo "publish=true" >> $GITHUB_OUTPUT
+            echo "Релиза $TAG нет — выкладываем."
+          fi
+
+      # Список изменений берём из раздела CHANGELOG.md с этой версией.
+      - name: Собрать описание
+        if: steps.check.outputs.publish == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '/^## / { on = ($2 == v); next } on { print }' CHANGELOG.md > notes.md
+          {
+            cat notes.md
+            echo
+            echo "Скачайте **USB-of_on-Setup.exe** и запустите. Если программа уже стоит — она предложит обновиться сама."
+          } > release-body.md
+          cat release-body.md
+
+      - name: Выложить релиз
+        if: steps.check.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: USB-of_on ${{ steps.version.outputs.version }}
+          body_path: release-body.md
+          files: dist/USB-of_on-Setup.exe
+          make_latest: 'true'
+          fail_on_unmatched_files: true
+
+  badges:
+    needs: build
+    if: always() && needs.build.result != 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Посчитать загрузки
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/badges.py
+
+      - name: Записать значки
+        run: |
+          if git diff --quiet -- docs/badges; then
+            echo "значки не изменились"
+            exit 0
+          fi
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git add docs/badges
+          git commit -m "Значки: свежие числа загрузок и версии"
+          git pull --rebase
+          git push
