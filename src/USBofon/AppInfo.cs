@@ -30,6 +30,7 @@ namespace USBofon
         public static readonly Link[] FindMe =
         {
             new Link { Title = "AveHarrisan", Hint = "телеграм автора", Url = "https://t.me/aveharrisan", Image = "aveharrisan" },
+            new Link { Title = "GitHub", Hint = "страница программы и все версии", Url = "https://github.com/" + Repository, Image = "github" },
             new Link { Title = "Котамарин", Hint = "канал про игры и раздачи", Url = "https://t.me/kotamarine", Image = "kotamarine" },
             new Link { Title = "lvl.su", Hint = "гайды и вики", Url = "https://lvl.su/", Image = "lvl" },
             new Link { Title = "Discord", Hint = "вопросы и ошибки", Url = "https://discord.com/invite/XYBvdvfv8t", Image = "discord" },
