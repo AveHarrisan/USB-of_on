@@ -203,6 +203,8 @@ namespace USBofon
             var parts = new List<string>();
             if (named) parts.Add(friendly);
             parts.Add(DevicePresentation.KindText(_kind));
+            if (_dev.Battery.HasValue) parts.Add("заряд " + _dev.Battery.Value + "%");
+            if (_dev.Bus == "Bluetooth") parts.Add("Bluetooth");
             if (_dev.DriveLetters.Count > 0) parts.Add("диск " + string.Join(" ", _dev.DriveLetters));
             if (!_dev.Present && !string.IsNullOrEmpty(_saved?.LastSeen)) parts.Add("был " + _saved.LastSeen);
             if (Hidden) parts.Add("скрыто");

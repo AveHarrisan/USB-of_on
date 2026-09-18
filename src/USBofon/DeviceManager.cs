@@ -18,14 +18,30 @@ namespace USBofon
             public string ClassName;
         }
 
-        /// <summary>Все USB-устройства: подключённые сейчас и те, что Windows помнит с прошлых подключений.</summary>
+        // Bluetooth-мыши и клавиатуры идут не через USB, но в списке им самое место.
+        private static readonly (string Enumerator, string Bus)[] Buses =
+        {
+            ("USB", "USB"),
+            ("BTHENUM", "Bluetooth"),
+            ("BTHLEDEVICE", "Bluetooth"),
+        };
+
+        /// <summary>Все устройства: подключённые сейчас и те, что Windows помнит с прошлых подключений.</summary>
         public static List<UsbDevice> Enumerate()
         {
             var present = EnumeratePresentNodes();
             var letters = GetDriveLettersByDisk();
+            var battery = Battery.Read();
             var result = new List<UsbDevice>();
+            foreach (var bus in Buses)
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, battery, result);
+            return result;
+        }
 
-            var set = SetupDiGetClassDevs(IntPtr.Zero, "USB", IntPtr.Zero, DIGCF_ALLCLASSES);
+        private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
+            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, List<UsbDevice> result)
+        {
+            var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
             try
             {
@@ -34,6 +50,7 @@ namespace USBofon
                 {
                     var dev = new UsbDevice
                     {
+                        Bus = bus,
                         DevInst = data.DevInst,
                         InstanceId = GetInstanceId(set, ref data),
                         Manufacturer = GetRegString(set, ref data, SPDRP_MFG),
@@ -49,7 +66,12 @@ namespace USBofon
                     ReadStatus(dev);
 
                     if (dev.Present)
+                    {
                         CollectChildren(dev, dev.DevInst, present, letters, 0);
+                        dev.Battery = Battery.ReadBluetooth(set, ref data)
+                            ?? (battery.TryGetValue(dev.DevInst, out var own) ? (int?)own : null)
+                            ?? FindBattery(dev.DevInst, battery, 0);
+                    }
 
                     dev.IsHub = dev.InstanceId.IndexOf("ROOT_HUB", StringComparison.OrdinalIgnoreCase) >= 0
                         || string.Equals(dev.Service, "usbhub", StringComparison.OrdinalIgnoreCase)
@@ -65,7 +87,19 @@ namespace USBofon
             {
                 SetupDiDestroyDeviceInfoList(set);
             }
-            return result;
+        }
+
+        /// <summary>Заряд ищем и у самого устройства, и у его HID-интерфейсов.</summary>
+        private static int? FindBattery(uint devInst, Dictionary<uint, int> battery, int depth)
+        {
+            if (depth > 4 || CM_Get_Child(out var child, devInst, 0) != CR_SUCCESS) return null;
+            do
+            {
+                if (battery.TryGetValue(child, out var percent)) return percent;
+                var deeper = FindBattery(child, battery, depth + 1);
+                if (deeper.HasValue) return deeper;
+            } while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
+            return null;
         }
 
         public enum ChangeResult { Done, NeedsReboot }

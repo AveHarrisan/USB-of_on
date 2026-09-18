@@ -15,6 +15,10 @@ namespace USBofon
         public string Pid;
         public string Serial;
         public uint DevInst;
+        /// <summary>«USB» или «Bluetooth».</summary>
+        public string Bus = "USB";
+        /// <summary>Заряд в процентах, если устройство его сообщает.</summary>
+        public int? Battery;
 
         public bool Present;
         public bool Disabled;
