@@ -68,14 +68,36 @@ namespace USBofon
                 try { await _checkUpdates(true); }
                 finally { if (!IsDisposed) check.Enabled = true; }
             };
+            var help = new Button { Text = "Инструкция", AutoSize = true };
+            help.Click += (s, e) =>
+            {
+                using (var form = new HelpForm())
+                    form.ShowDialog(this);
+            };
+            var data = new Button { Text = "Папка с сохранениями", AutoSize = true };
+            data.Click += (s, e) => OpenDataFolder();
             var close = new Button { Text = "Закрыть", AutoSize = true, DialogResult = DialogResult.OK };
+            buttons.Controls.Add(help);
             buttons.Controls.Add(check);
+            buttons.Controls.Add(data);
             buttons.Controls.Add(close);
             root.Controls.Add(buttons);
 
             Controls.Add(root);
             AcceptButton = close;
             CancelButton = close;
+        }
+
+        /// <summary>Имена и скрытые устройства лежат в ProgramData, а не рядом с программой.</summary>
+        private static void OpenDataFolder()
+        {
+            var dir = System.IO.Path.GetDirectoryName(new DeviceStore().FilePath);
+            try
+            {
+                System.IO.Directory.CreateDirectory(dir);
+                System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+            }
+            catch { }
         }
 
         private static Control Section(string caption, string text)
