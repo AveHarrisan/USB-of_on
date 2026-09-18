@@ -20,6 +20,8 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 PrivilegesRequired=admin
+; Программа 64-битная там, где это возможно: ставим в «Program Files», а не в «Program Files (x86)».
+ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
 OutputBaseFilename=USB-of_on-Setup
 SetupIconFile=..\assets\icon.ico
@@ -30,6 +32,8 @@ WizardImageFile=wizard.bmp,wizard@2x.bmp
 WizardSmallImageFile=small.bmp,small@2x.bmp
 Compression=lzma2
 SolidCompression=yes
+; Программа живёт в трее: установщик и деинсталлятор видят её по этому мьютексу.
+AppMutex=Global\USB-of_on-running
 CloseApplications=force
 RestartApplications=no
 VersionInfoVersion={#AppVersion}
@@ -58,9 +62,13 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 ; Обновление из программы (тихий режим с ключом /RELAUNCH) — открываем программу снова.
 Filename: "{app}\{#AppExe}"; Flags: nowait runascurrentuser; Check: IsRelaunch
 
+[UninstallRun]
+; Автозапуск программа создаёт сама задачей Планировщика — убираем её вместе с программой.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#AppName}"" /F"; Flags: runhidden; RunOnceId: "DeleteAutostartTask"
+
 [Code]
 const
-  LinkCount = 6;
+  LinkCount = 7;
 
 var
   LinkUrls: array[0..LinkCount - 1] of String;
@@ -68,18 +76,20 @@ var
 
 procedure InitLinks;
 begin
-  LinkTitles[0] := 'Boosty — поддержать разово или подпиской';
+  LinkTitles[0] := 'Boosty';
   LinkUrls[0] := 'https://boosty.to/aveharrisan';
-  LinkTitles[1] := 'DonationAlerts — разовый донат';
+  LinkTitles[1] := 'DonationAlerts';
   LinkUrls[1] := 'https://www.donationalerts.com/r/aveharrisan';
-  LinkTitles[2] := 'AveHarrisan — телеграм автора';
+  LinkTitles[2] := 'Телеграм автора';
   LinkUrls[2] := 'https://t.me/aveharrisan';
-  LinkTitles[3] := 'Котамарин — канал про игры и раздачи';
+  LinkTitles[3] := 'Котамарин — игры и раздачи';
   LinkUrls[3] := 'https://t.me/kotamarine';
   LinkTitles[4] := 'lvl.su — гайды и вики';
   LinkUrls[4] := 'https://lvl.su/';
   LinkTitles[5] := 'Discord — вопросы и ошибки';
   LinkUrls[5] := 'https://discord.com/invite/XYBvdvfv8t';
+  LinkTitles[6] := 'GitHub — страница программы';
+  LinkUrls[6] := 'https://github.com/AveHarrisan/USB-of_on';
 end;
 
 procedure OpenUrl(const Url: String);
@@ -105,6 +115,26 @@ begin
   OpenUrl(LinkUrls[2]);
 end;
 
+{ Версии до 1.2.1 ставились в «Program Files (x86)». Такую копию удаляем тихо:
+  сохранённые имена лежат в ProgramData и при тихом удалении не трогаются. }
+procedure RemoveOld32BitCopy;
+var
+  Uninstaller: String;
+  ResultCode: Integer;
+begin
+  if not Is64BitInstallMode then
+    Exit;
+  if RegQueryStringValue(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8B7F2E4C-3D1A-4B6E-9C2F-5A7D1E0B4C93}_is1',
+    'UninstallString', Uninstaller) then
+    Exec(RemoveQuotes(Uninstaller), '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    RemoveOld32BitCopy;
+end;
+
 function IsRelaunch: Boolean;
 var
   I: Integer;
@@ -115,27 +145,37 @@ begin
       Result := True;
 end;
 
-{ Блок «Поддержать» и «Найти меня» со ссылками на странице мастера. }
-procedure AddLinks(Parent: TWinControl; Left: Integer);
+{ Ссылки в две колонки: слева «Поддержать», справа «Найти меня». }
+procedure AddCaption(Parent: TWinControl; const Text: String; Left, Top: Integer);
 var
-  I, Y: Integer;
-  Caption, Link: TNewStaticText;
+  Caption: TNewStaticText;
 begin
-  Y := Parent.ClientHeight - ScaleY(148);
+  Caption := TNewStaticText.Create(WizardForm);
+  Caption.Parent := Parent;
+  Caption.Caption := Text;
+  Caption.Font.Style := [fsBold];
+  Caption.Left := Left;
+  Caption.Top := Top;
+end;
+
+procedure AddLinks(Parent: TWinControl; Left, Top: Integer);
+var
+  I, X, Y: Integer;
+  Link: TNewStaticText;
+begin
+  AddCaption(Parent, 'Поддержать', Left, Top);
+  AddCaption(Parent, 'Найти меня', Left + ScaleX(120), Top);
   for I := 0 to LinkCount - 1 do
   begin
-    if (I = 0) or (I = 2) then
+    if I < 2 then
     begin
-      Caption := TNewStaticText.Create(WizardForm);
-      Caption.Parent := Parent;
-      if I = 0 then
-        Caption.Caption := 'Поддержать'
-      else
-        Caption.Caption := 'Найти меня';
-      Caption.Font.Style := [fsBold];
-      Caption.Left := Left;
-      Caption.Top := Y;
-      Y := Y + ScaleY(18);
+      X := Left;
+      Y := Top + ScaleY(19) + I * ScaleY(17);
+    end
+    else
+    begin
+      X := Left + ScaleX(120);
+      Y := Top + ScaleY(19) + (I - 2) * ScaleY(17);
     end;
     Link := TNewStaticText.Create(WizardForm);
     Link.Parent := Parent;
@@ -145,11 +185,8 @@ begin
     Link.Font.Color := clHotLight;
     Link.Font.Style := [fsUnderline];
     Link.OnClick := @LinkClick;
-    Link.Left := Left + ScaleX(12);
+    Link.Left := X;
     Link.Top := Y;
-    Y := Y + ScaleY(17);
-    if I = 1 then
-      Y := Y + ScaleY(8);
   end;
 end;
 
@@ -178,9 +215,30 @@ begin
   FindMe.Height := WizardForm.CancelButton.Height;
   FindMe.OnClick := @FindMeClick;
 
-  { Полный список ссылок — внизу первой и последней страницы. }
-  AddLinks(WizardForm.WelcomePage, WizardForm.WelcomeLabel2.Left);
-  AddLinks(WizardForm.FinishedPage, WizardForm.FinishedLabel.Left);
+  { Полный список ссылок — сразу под текстом первой страницы. Высоту текста
+    считаем по нему самому: от масштаба экрана она меняется. }
+  WizardForm.WelcomeLabel2.AdjustHeight;
+  AddLinks(WizardForm.WelcomePage, WizardForm.WelcomeLabel2.Left,
+    WizardForm.WelcomeLabel2.Top + WizardForm.WelcomeLabel2.Height + ScaleY(12));
+end;
+
+var
+  FinishedLinksAdded: Boolean;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Top: Integer;
+begin
+  { На последней странице мастер расставляет текст и галочку «Запустить» только при показе. }
+  if (CurPageID = wpFinished) and not FinishedLinksAdded then
+  begin
+    FinishedLinksAdded := True;
+    WizardForm.FinishedLabel.AdjustHeight;
+    Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height;
+    if WizardForm.RunList.Visible then
+      Top := WizardForm.RunList.Top + WizardForm.RunList.Items.Count * ScaleY(22);
+    AddLinks(WizardForm.FinishedPage, WizardForm.FinishedLabel.Left, Top + ScaleY(12));
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
