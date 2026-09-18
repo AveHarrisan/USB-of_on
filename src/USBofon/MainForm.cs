@@ -26,6 +26,15 @@ namespace USBofon
         private bool _refreshing, _refreshPending;
 
         private readonly CardView _cards = new CardView();
+        private readonly NotifyIcon _tray = new NotifyIcon();
+        private bool _exitRequested, _trayHintShown, _loaded;
+
+        // Уведомления о подключении: что было подключено при прошлом обновлении и что подсветить.
+        private HashSet<string> _knownPresent;
+        private List<string> _pendingHighlight;
+        private HashSet<string> _highlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Timer _highlightTimer = new Timer { Interval = 15000 };
+        private bool _startHidden = Autostart.IsStartedByAutostart && Settings.StartMinimized;
         private ToolStripButton _viewSimple, _viewDetailed;
         private ToolStripItem[] _detailedOnly;
         private bool _simple = Settings.SimpleView;
@@ -56,8 +65,13 @@ namespace USBofon
             BuildUi();
 
             _deviceChangeTimer.Tick += (s, e) => { _deviceChangeTimer.Stop(); RefreshDevices(); };
+            BuildTray();
+
             Load += (s, e) =>
             {
+                if (_loaded) return;
+                _loaded = true;
+                Task.Run(() => Autostart.RepairPath());
                 try { _store.Load(); }
                 catch (Exception ex) { ShowError("Не удалось прочитать сохранённые имена:\r\n" + _store.FilePath, ex); }
                 RefreshDevices();
@@ -87,6 +101,7 @@ namespace USBofon
             });
 
             var btnAbout = new ToolStripButton("О программе", null, (s, e) => ShowAbout()) { Alignment = ToolStripItemAlignment.Right };
+            var btnSettings = BuildSettingsMenu();
             var btnSupport = new ToolStripDropDownButton("Поддержать") { Alignment = ToolStripItemAlignment.Right, ForeColor = Color.Firebrick };
             foreach (var link in AppInfo.Support)
             {
@@ -101,7 +116,7 @@ namespace USBofon
                 Font = new Font(toolbar.Font, FontStyle.Bold),
                 ForeColor = Color.SeaGreen,
             };
-            toolbar.Items.AddRange(new ToolStripItem[] { btnAbout, btnSupport, _btnUpdate });
+            toolbar.Items.AddRange(new ToolStripItem[] { btnAbout, btnSettings, btnSupport, _btnUpdate });
 
             BuildUpdateBar();
 
@@ -185,6 +200,54 @@ namespace USBofon
                 if (e.KeyCode == Keys.F5) { RefreshDevices(); e.Handled = true; }
             };
             ApplyView();
+        }
+
+        private ToolStripDropDownButton BuildSettingsMenu()
+        {
+            var button = new ToolStripDropDownButton("Настройки") { Alignment = ToolStripItemAlignment.Right };
+            var autostart = new ToolStripMenuItem("Запускать при входе в Windows") { CheckOnClick = false };
+            var minimized = new ToolStripMenuItem("Запускаться в трее") { CheckOnClick = false, ToolTipText = "При автозапуске окно не открывается — только значок в трее" };
+
+            autostart.Click += (s, e) =>
+            {
+                try
+                {
+                    if (autostart.Checked) Autostart.Disable(); else Autostart.Enable();
+                }
+                catch (Exception ex)
+                {
+                    ShowError("Не удалось изменить автозапуск.", ex);
+                }
+            };
+            minimized.Click += (s, e) => Settings.StartMinimized = !Settings.StartMinimized;
+
+            // Состояние читаем при каждом открытии: задачу могли удалить в Планировщике вручную.
+            button.DropDownOpening += (s, e) =>
+            {
+                autostart.Checked = Autostart.Enabled;
+                minimized.Checked = Settings.StartMinimized;
+                minimized.Enabled = autostart.Checked;
+            };
+            var notify = new ToolStripMenuItem("Уведомлять о подключении устройств")
+            {
+                ToolTipText = "Уведомление у трея, когда вставляют флешку, токен или другое устройство",
+            };
+            notify.Click += (s, e) => Settings.NotifyConnected = !Settings.NotifyConnected;
+            button.DropDownOpening += (s, e) => notify.Checked = Settings.NotifyConnected;
+
+            var namedOnly = new ToolStripMenuItem("Показывать только подписанные устройства")
+            {
+                ToolTipText = "Только устройства, которым вы дали имя",
+            };
+            namedOnly.Click += (s, e) =>
+            {
+                Settings.NamedOnly = !Settings.NamedOnly;
+                FillList();
+            };
+            button.DropDownOpening += (s, e) => namedOnly.Checked = Settings.NamedOnly;
+
+            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, new ToolStripSeparator(), autostart, minimized });
+            return button;
         }
 
         private void SetView(bool simple)
@@ -310,7 +373,7 @@ namespace USBofon
                 var setup = await Updater.DownloadAsync(_release, progress, System.Threading.CancellationToken.None);
                 _updateText.Text = "Установка…";
                 Updater.RunInstaller(setup);
-                Close();
+                ExitApp();
             }
             catch (Exception ex)
             {
@@ -344,8 +407,154 @@ namespace USBofon
             e.Handled = true;
         }
 
+        private void BuildTray()
+        {
+            _tray.Icon = Icon;
+            _tray.Text = AppInfo.Name;
+            _tray.Visible = true;
+
+            var menu = new ContextMenuStrip();
+            var open = new ToolStripMenuItem("Открыть " + AppInfo.Name, null, (s, e) => ShowFromTray()) { Font = new Font(menu.Font, FontStyle.Bold) };
+            var exit = new ToolStripMenuItem("Закрыть приложение", null, (s, e) => ConfirmExit());
+            menu.Items.AddRange(new ToolStripItem[] { open, new ToolStripSeparator(), exit });
+            _tray.ContextMenuStrip = menu;
+            _tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowFromTray(); };
+            _tray.BalloonTipClicked += (s, e) => OpenHighlighted();
+            _highlightTimer.Tick += (s, e) =>
+            {
+                _highlightTimer.Stop();
+                _highlight.Clear();
+                FillList();
+            };
+        }
+
+        private void NotifyConnected()
+        {
+            var present = new HashSet<string>(
+                _devices.Where(d => d.Present && !d.IsHub && !d.IsInterface).Select(d => d.InstanceId),
+                StringComparer.OrdinalIgnoreCase);
+            var known = _knownPresent;
+            _knownPresent = present;
+            // Первое обновление после запуска — это не подключение, а то, что уже было вставлено.
+            if (known == null || !Settings.NotifyConnected) return;
+
+            var added = _devices
+                .Where(d => present.Contains(d.InstanceId) && !known.Contains(d.InstanceId))
+                .Where(d => _store.Find(d.InstanceId)?.Hidden != true)
+                .ToList();
+            if (added.Count == 0) return;
+
+            string title, text;
+            if (added.Count == 1)
+            {
+                var d = added[0];
+                var name = _store.Find(d.InstanceId)?.Name;
+                var kind = DevicePresentation.KindText(DevicePresentation.Kind(d));
+                var letters = d.DriveLetters.Count > 0 ? " (" + string.Join(" ", d.DriveLetters) + ")" : "";
+                if (string.IsNullOrEmpty(name))
+                {
+                    title = "Новое устройство: " + kind.ToLowerInvariant();
+                    text = DevicePresentation.FriendlyName(d) + letters + "\r\nНажмите, чтобы открыть и дать имя.";
+                }
+                else
+                {
+                    title = "Подключено: " + name;
+                    text = DevicePresentation.FriendlyName(d) + letters + "\r\nНажмите, чтобы открыть.";
+                }
+            }
+            else
+            {
+                title = "Подключено устройств: " + added.Count;
+                text = string.Join("\r\n", added.Take(3).Select(Title)) + (added.Count > 3 ? "\r\n…" : "");
+            }
+
+            _pendingHighlight = added.Select(d => d.InstanceId).ToList();
+            _tray.ShowBalloonTip(6000, title, text, ToolTipIcon.Info);
+        }
+
+        /// <summary>Щелчок по уведомлению: открываем окно и подсвечиваем подключённые устройства.</summary>
+        private void OpenHighlighted()
+        {
+            var ids = _pendingHighlight;
+            _pendingHighlight = null;
+            if (ids == null) return;
+
+            ShowFromTray();
+            _highlight = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            FillList();
+            _highlightTimer.Stop();
+            _highlightTimer.Start();
+
+            // Устройство может быть не видно из-за «только подписанные» — тогда сразу предлагаем дать имя.
+            var visible = _simple ? _cards.HighlightedCount : _list.Items.Cast<ListViewItem>().Count(i => _highlight.Contains(((UsbDevice)i.Tag).InstanceId));
+            if (visible == 0 && ids.Count == 1)
+            {
+                var dev = _devices.FirstOrDefault(d => string.Equals(d.InstanceId, ids[0], StringComparison.OrdinalIgnoreCase));
+                if (dev != null) RenameDevice(dev);
+            }
+        }
+
+        public void ShowFromTray()
+        {
+            _startHidden = false;
+            Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        private void ConfirmExit()
+        {
+            ShowFromTray();
+            using (var dlg = new ConfirmExitForm())
+                if (dlg.ShowDialog(this) == DialogResult.Yes)
+                    ExitApp();
+        }
+
+        private void ExitApp()
+        {
+            _exitRequested = true;
+            _tray.Visible = false;
+            Close();
+        }
+
+        // При автозапуске «в трей» окно не показываем вовсе.
+        protected override void SetVisibleCore(bool value)
+        {
+            if (_startHidden && value)
+            {
+                if (!IsHandleCreated) CreateHandle();
+                OnLoad(EventArgs.Empty);
+                _startHidden = false;
+                value = false;
+            }
+            base.SetVisibleCore(value);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            // Крестик прячет окно в трей. Закрывается программа только из меню в трее,
+            // при обновлении и когда Windows завершает работу.
+            if (e.CloseReason == CloseReason.UserClosing && !_exitRequested)
+            {
+                e.Cancel = true;
+                Hide();
+                if (!_trayHintShown)
+                {
+                    _trayHintShown = true;
+                    _pendingHighlight = null;
+                    _tray.ShowBalloonTip(4000, AppInfo.Name,
+                        "Программа продолжает работать в трее. Закрыть её можно правой кнопкой мыши по значку.", ToolTipIcon.Info);
+                }
+                return;
+            }
+            _tray.Visible = false;
+            base.OnFormClosing(e);
+        }
+
         protected override void WndProc(ref Message m)
         {
+            // Завершение работы Windows и установщик обновления (Restart Manager) — закрываемся по-настоящему.
+            if (m.Msg == 0x11 /* WM_QUERYENDSESSION */) _exitRequested = true;
             base.WndProc(ref m);
             // Windows сообщает о любом подключении/отключении — обновляем список с небольшой задержкой.
             if (m.Msg == NativeMethods.WM_DEVICECHANGE)
@@ -367,6 +576,8 @@ namespace USBofon
                     _refreshPending = false;
                     _devices = await Task.Run(() => DeviceManager.Enumerate());
                 } while (_refreshPending);
+
+                NotifyConnected();
 
                 var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
                 var changed = false;
@@ -399,6 +610,7 @@ namespace USBofon
                 .Select(d => new { Dev = d, Saved = _store.Find(d.InstanceId) })
                 .Where(x => _showHidden.Checked || x.Saved == null || !x.Saved.Hidden)
                 .Where(x => _showService.Checked || !(x.Dev.IsHub || x.Dev.IsInterface))
+                .Where(x => !Settings.NamedOnly || !string.IsNullOrEmpty(x.Saved?.Name))
                 .Where(x => x.Dev.Present || _showAbsent.Checked || !string.IsNullOrEmpty(x.Saved?.Name))
                 .Where(x => query.Length == 0 || Matches(x.Dev, x.Saved, query))
                 .OrderByDescending(x => x.Dev.Present)
@@ -412,13 +624,14 @@ namespace USBofon
                     .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
                     .Where(x => _showHidden.Checked || x.Saved == null || !x.Saved.Hidden)
                     .Where(x => !x.Dev.IsHub && !x.Dev.IsInterface)
+                    .Where(x => !Settings.NamedOnly || !string.IsNullOrEmpty(x.Saved?.Name))
                     .Where(x => x.Dev.Present || !string.IsNullOrEmpty(x.Saved?.Name))
                     .Where(x => query.Length == 0 || Matches(x.Dev, x.Saved, query))
                     .OrderByDescending(x => x.Dev.Present)
                     .ThenByDescending(x => !string.IsNullOrEmpty(x.Saved?.Name))
                     .ThenBy(x => x.Saved?.Name ?? DevicePresentation.FriendlyName(x.Dev), StringComparer.CurrentCultureIgnoreCase)
                     .ToList();
-                _cards.SetItems(cards, query.Length > 0);
+                _cards.SetItems(cards, query.Length > 0 || Settings.NamedOnly, _highlight);
             }
 
             _list.BeginUpdate();
@@ -448,9 +661,16 @@ namespace USBofon
                     item.UseItemStyleForSubItems = true;
 
                 item.Selected = selected.Contains(d.InstanceId);
+                if (_highlight.Contains(d.InstanceId))
+                {
+                    item.BackColor = Color.FromArgb(254, 243, 199);
+                    item.Selected = true;
+                }
                 _list.Items.Add(item);
             }
             _list.EndUpdate();
+            var firstHighlighted = _list.Items.Cast<ListViewItem>().FirstOrDefault(i => _highlight.Contains(((UsbDevice)i.Tag).InstanceId));
+            firstHighlighted?.EnsureVisible();
 
             var present = _devices.Count(d => d.Present && !d.IsHub && !d.IsInterface);
             var disabled = _devices.Count(d => d.Present && d.Disabled);
