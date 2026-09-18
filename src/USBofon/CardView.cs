@@ -33,8 +33,12 @@ namespace USBofon
             _empty.Font = new Font("Segoe UI", 11f);
         }
 
-        public void SetItems(IList<(UsbDevice Dev, SavedDevice Saved)> items, bool filtered)
+        public int HighlightedCount { get; private set; }
+
+        public void SetItems(IList<(UsbDevice Dev, SavedDevice Saved)> items, bool filtered, ICollection<string> highlight)
         {
+            HighlightedCount = 0;
+            DeviceCard firstHighlighted = null;
             SuspendLayout();
             var old = new List<Control>();
             foreach (Control c in Controls) old.Add(c);
@@ -43,7 +47,7 @@ namespace USBofon
 
             if (items.Count == 0)
             {
-                _empty.Text = filtered ? "Ничего не найдено" : "USB-устройств не подключено.\r\nВставьте токен или флешку — они появятся здесь.";
+                _empty.Text = filtered ? "Ничего не найдено.\r\nЕсли включено «Настройки → Показывать только подписанные устройства», дайте устройству имя в подробном виде или снимите эту галочку." : "USB-устройств не подключено.\r\nВставьте токен или флешку — они появятся здесь.";
                 _empty.Height = LogicalToDeviceUnits(160);
                 Controls.Add(_empty);
             }
@@ -65,14 +69,27 @@ namespace USBofon
                         Margin = new Padding(LogicalToDeviceUnits(4), 0, 0, LogicalToDeviceUnits(6)),
                     });
                 }
-                var card = new DeviceCard(dev, saved);
+                var card = new DeviceCard(dev, saved) { Highlighted = highlight.Contains(dev.InstanceId) };
+                if (card.Highlighted)
+                {
+                    HighlightedCount++;
+                    if (firstHighlighted == null) firstHighlighted = card;
+                }
                 card.ToggleRequested += (d, on) => ToggleRequested?.Invoke(d, on);
                 card.MenuRequested += (d, p) => MenuRequested?.Invoke(d, card, p);
                 card.RenameRequested += d => RenameRequested?.Invoke(d);
                 Controls.Add(card);
             }
-            ResumeLayout();
+            ResumeLayout(false);
             UpdateWidths();
+            PerformLayout();
+            // Прокручиваем после раскладки и только если карточку не видно.
+            if (firstHighlighted != null && IsHandleCreated)
+                BeginInvoke(new Action(() =>
+                {
+                    if (!firstHighlighted.IsDisposed && !ClientRectangle.Contains(firstHighlighted.Bounds))
+                        ScrollControlIntoView(firstHighlighted);
+                }));
         }
 
         protected override void OnClientSizeChanged(EventArgs e)
@@ -101,6 +118,9 @@ namespace USBofon
         private readonly SavedDevice _saved;
         private readonly DeviceKind _kind;
         private bool _hover, _hoverToggle, _hoverMenu;
+
+        /// <summary>Только что подключённое устройство, открытое из уведомления.</summary>
+        public bool Highlighted { get; set; }
 
         private static readonly Font TitleFont = new Font("Segoe UI Semibold", 11.5f);
         private static readonly Font TextFont = new Font("Segoe UI", 9f);
@@ -145,8 +165,8 @@ namespace USBofon
 
             var card = new Rectangle(0, 0, Width - 1, Height - 1);
             using (var path = Rounded(card, S(10)))
-            using (var fill = new SolidBrush(Color.White))
-            using (var pen = new Pen(_hover ? Color.FromArgb(191, 219, 254) : Border))
+            using (var fill = new SolidBrush(Highlighted ? Color.FromArgb(254, 252, 232) : Color.White))
+            using (var pen = new Pen(Highlighted ? Color.FromArgb(245, 158, 11) : _hover ? Color.FromArgb(191, 219, 254) : Border, Highlighted ? S(2) : 1))
             {
                 g.FillPath(fill, path);
                 g.DrawPath(pen, path);
