@@ -25,6 +25,12 @@ namespace USBofon
         private ToolStripMenuItem _miRename, _miHide, _miEnable, _miDisable;
         private bool _refreshing, _refreshPending;
 
+        private readonly CardView _cards = new CardView();
+        private ToolStripButton _viewSimple, _viewDetailed;
+        private ToolStripItem[] _detailedOnly;
+        private bool _simple = Settings.SimpleView;
+        private DateTime _lastToggle;
+
         private readonly Panel _updateBar = new Panel();
         private readonly Label _updateText = new Label();
         private readonly LinkLabel _updateNotes = new LinkLabel();
@@ -70,9 +76,14 @@ namespace USBofon
             _btnHide = new ToolStripButton("Скрыть", null, (s, e) => ToggleHiddenSelected()) { ToolTipText = "Скрыть устройство из списка (Del)" };
             _btnEnable = new ToolStripButton("Включить", null, (s, e) => SetEnabledSelected(true));
             _btnDisable = new ToolStripButton("Выключить", null, (s, e) => SetEnabledSelected(false));
+            _viewSimple = new ToolStripButton("Простой вид", null, (s, e) => SetView(true)) { ToolTipText = "Карточки устройств" };
+            _viewDetailed = new ToolStripButton("Подробный вид", null, (s, e) => SetView(false)) { ToolTipText = "Таблица со всеми сведениями" };
+            var sep1 = new ToolStripSeparator();
+            var sep2 = new ToolStripSeparator();
+            _detailedOnly = new ToolStripItem[] { sep1, _btnRename, _btnHide, sep2, _btnEnable, _btnDisable };
             toolbar.Items.AddRange(new ToolStripItem[]
             {
-                btnRefresh, new ToolStripSeparator(), _btnRename, _btnHide, new ToolStripSeparator(), _btnEnable, _btnDisable,
+                _viewSimple, _viewDetailed, new ToolStripSeparator(), btnRefresh, sep1, _btnRename, _btnHide, sep2, _btnEnable, _btnDisable,
             });
 
             var btnAbout = new ToolStripButton("О программе", null, (s, e) => ShowAbout()) { Alignment = ToolStripItemAlignment.Right };
@@ -146,12 +157,24 @@ namespace USBofon
             });
             _list.ContextMenuStrip = menu;
 
+            _cards.Dock = DockStyle.Fill;
+            _cards.ToggleRequested += (d, on) =>
+            {
+                // Двойной щелчок по переключателю не должен дёргать устройство дважды.
+                if ((DateTime.Now - _lastToggle).TotalMilliseconds < 800) return;
+                _lastToggle = DateTime.Now;
+                SetEnabled(new List<UsbDevice> { d }, on, confirm: false);
+            };
+            _cards.RenameRequested += RenameDevice;
+            _cards.MenuRequested += ShowCardMenu;
+
             var statusStrip = new StatusStrip();
             _status.Spring = true;
             _status.TextAlign = ContentAlignment.MiddleLeft;
             statusStrip.Items.Add(_status);
 
             Controls.Add(_list);
+            Controls.Add(_cards);
             Controls.Add(filters);
             Controls.Add(_updateBar);
             Controls.Add(toolbar);
@@ -161,7 +184,42 @@ namespace USBofon
             {
                 if (e.KeyCode == Keys.F5) { RefreshDevices(); e.Handled = true; }
             };
-            UpdateButtons();
+            ApplyView();
+        }
+
+        private void SetView(bool simple)
+        {
+            _simple = simple;
+            Settings.SimpleView = simple;
+            ApplyView();
+            FillList();
+        }
+
+        private void ApplyView()
+        {
+            _viewSimple.Checked = _simple;
+            _viewDetailed.Checked = !_simple;
+            _cards.Visible = _simple;
+            _list.Visible = !_simple;
+            _showService.Visible = !_simple;
+            _showAbsent.Visible = !_simple;
+            foreach (var item in _detailedOnly) item.Visible = !_simple;
+            if (_simple) _cards.BringToFront(); else _list.BringToFront();
+        }
+
+        private void ShowCardMenu(UsbDevice dev, Control owner, Point at)
+        {
+            var saved = _store.Find(dev.InstanceId);
+            var list = new List<UsbDevice> { dev };
+            var menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem(string.IsNullOrEmpty(saved?.Name) ? "Дать имя…" : "Переименовать…", null, (s, e) => RenameDevice(dev)));
+            if (dev.Present && !dev.IsHub)
+                menu.Items.Add(new ToolStripMenuItem(dev.Disabled ? "Включить" : "Выключить", null, (s, e) => SetEnabled(list, dev.Disabled, confirm: false)));
+            menu.Items.Add(new ToolStripMenuItem(saved?.Hidden == true ? "Показать в списке" : "Скрыть из списка", null, (s, e) => ToggleHidden(list)));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Копировать сведения", null, (s, e) => CopyInfo(list)));
+            menu.Closed += (s, e) => BeginInvoke(new Action(menu.Dispose));
+            menu.Show(owner, at);
         }
 
         private void BuildUpdateBar()
@@ -348,6 +406,21 @@ namespace USBofon
                 .ThenBy(x => x.Saved?.Name ?? x.Dev.DisplayDescription, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
 
+            if (_simple)
+            {
+                var cards = _devices
+                    .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
+                    .Where(x => _showHidden.Checked || x.Saved == null || !x.Saved.Hidden)
+                    .Where(x => !x.Dev.IsHub && !x.Dev.IsInterface)
+                    .Where(x => x.Dev.Present || !string.IsNullOrEmpty(x.Saved?.Name))
+                    .Where(x => query.Length == 0 || Matches(x.Dev, x.Saved, query))
+                    .OrderByDescending(x => x.Dev.Present)
+                    .ThenByDescending(x => !string.IsNullOrEmpty(x.Saved?.Name))
+                    .ThenBy(x => x.Saved?.Name ?? DevicePresentation.FriendlyName(x.Dev), StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+                _cards.SetItems(cards, query.Length > 0);
+            }
+
             _list.BeginUpdate();
             _list.Items.Clear();
             foreach (var x in visible)
@@ -387,7 +460,7 @@ namespace USBofon
 
         private static bool Matches(UsbDevice d, SavedDevice s, string q)
         {
-            var hay = string.Join("\n", s?.Name, s?.Note, d.DisplayDescription, d.Manufacturer, d.Serial, d.VidPid,
+            var hay = string.Join("\n", s?.Name, s?.Note, d.DisplayDescription, DevicePresentation.FriendlyName(d), d.Manufacturer, d.Serial, d.VidPid,
                 d.InstanceId, string.Join(" ", d.Children), string.Join(" ", d.DriveLetters));
             return hay.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0;
         }
@@ -412,8 +485,11 @@ namespace USBofon
         private void RenameSelected()
         {
             var sel = SelectedDevices();
-            if (sel.Count != 1) return;
-            var dev = sel[0];
+            if (sel.Count == 1) RenameDevice(sel[0]);
+        }
+
+        private void RenameDevice(UsbDevice dev)
+        {
             using (var dlg = new EditForm(dev, _store.Find(dev.InstanceId)))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -428,9 +504,10 @@ namespace USBofon
             FillList();
         }
 
-        private void ToggleHiddenSelected()
+        private void ToggleHiddenSelected() => ToggleHidden(SelectedDevices());
+
+        private void ToggleHidden(List<UsbDevice> sel)
         {
-            var sel = SelectedDevices();
             if (sel.Count == 0) return;
             var hide = !sel.All(d => _store.Find(d.InstanceId)?.Hidden == true);
             foreach (var dev in sel)
@@ -444,9 +521,11 @@ namespace USBofon
             FillList();
         }
 
-        private void SetEnabledSelected(bool enable)
+        private void SetEnabledSelected(bool enable) => SetEnabled(SelectedDevices(), enable, confirm: true);
+
+        private void SetEnabled(List<UsbDevice> devices, bool enable, bool confirm)
         {
-            var targets = SelectedDevices().Where(d => d.Present && d.Disabled == enable).ToList();
+            var targets = devices.Where(d => d.Present && d.Disabled == enable).ToList();
             if (targets.Count == 0) return;
 
             if (!enable)
@@ -462,14 +541,18 @@ namespace USBofon
                     if (targets.Count == 0) return;
                 }
 
-                var names = string.Join("\r\n", targets.Select(d => "• " + Title(d)));
-                var warning = targets.Any(d => d.IsInput)
-                    ? "\r\n\r\n⚠ Среди них есть клавиатура или мышь — после выключения ими нельзя будет пользоваться."
-                    : "";
-                if (MessageBox.Show(this, "Выключить устройства?\r\n\r\n" + names + warning, Text,
-                        MessageBoxButtons.YesNo, targets.Any(d => d.IsInput) ? MessageBoxIcon.Warning : MessageBoxIcon.Question)
-                    != DialogResult.Yes)
-                    return;
+                // В простом виде переключатель щёлкают поштучно — спрашиваем только про клавиатуру и мышь.
+                if (confirm || targets.Any(d => d.IsInput))
+                {
+                    var names = string.Join("\r\n", targets.Select(d => "• " + Title(d)));
+                    var warning = targets.Any(d => d.IsInput)
+                        ? "\r\n\r\n⚠ Среди них есть клавиатура или мышь — после выключения ими нельзя будет пользоваться."
+                        : "";
+                    if (MessageBox.Show(this, "Выключить устройства?\r\n\r\n" + names + warning, Text,
+                            MessageBoxButtons.YesNo, targets.Any(d => d.IsInput) ? MessageBoxIcon.Warning : MessageBoxIcon.Question)
+                        != DialogResult.Yes)
+                        return;
+                }
             }
 
             var errors = new StringBuilder();
@@ -505,9 +588,10 @@ namespace USBofon
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private void CopySelected()
+        private void CopySelected() => CopyInfo(SelectedDevices());
+
+        private void CopyInfo(List<UsbDevice> sel)
         {
-            var sel = SelectedDevices();
             if (sel.Count == 0) return;
             var sb = new StringBuilder();
             foreach (var d in sel)
@@ -532,7 +616,8 @@ namespace USBofon
         private string Title(UsbDevice d)
         {
             var name = _store.Find(d.InstanceId)?.Name;
-            return string.IsNullOrEmpty(name) ? d.DisplayDescription : name + " (" + d.DisplayDescription + ")";
+            var friendly = DevicePresentation.FriendlyName(d);
+            return string.IsNullOrEmpty(name) ? friendly : name + " (" + friendly + ")";
         }
 
         private void TrySave()
