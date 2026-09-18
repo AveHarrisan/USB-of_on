@@ -8,6 +8,7 @@ namespace USBofon
     {
         public const uint DIGCF_PRESENT = 0x2;
         public const uint DIGCF_ALLCLASSES = 0x4;
+        public const uint DIGCF_DEVICEINTERFACE = 0x10;
 
         public const uint SPDRP_DEVICEDESC = 0x0;
         public const uint SPDRP_SERVICE = 0x4;
