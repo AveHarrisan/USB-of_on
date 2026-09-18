@@ -26,6 +26,7 @@ namespace USBofon
 
         public readonly List<string> Children = new List<string>();
         public readonly List<string> ChildInstanceIds = new List<string>();
+        public readonly List<string> ChildClasses = new List<string>();
         public readonly List<string> DriveLetters = new List<string>();
 
         public string VidPid => Vid == null ? "" : Vid + ":" + Pid;

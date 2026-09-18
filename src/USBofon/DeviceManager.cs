@@ -150,6 +150,7 @@ namespace USBofon
                 if (present.TryGetValue(child, out var info))
                 {
                     dev.ChildInstanceIds.Add(info.InstanceId);
+                    if (!string.IsNullOrEmpty(info.ClassName)) dev.ChildClasses.Add(info.ClassName);
                     if (string.Equals(info.ClassName, "Keyboard", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(info.ClassName, "Mouse", StringComparison.OrdinalIgnoreCase))
                         dev.IsInput = true;
