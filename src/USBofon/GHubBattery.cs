@@ -18,12 +18,20 @@ namespace USBofon
         private const string Address = "ws://localhost:9010";
         private const int Port = 9010;
 
-        private static readonly TimeSpan CacheTime = TimeSpan.FromSeconds(60);
-        private static Dictionary<ushort, int> _cache = new Dictionary<ushort, int>();
+        public sealed class Entry
+        {
+            public ushort Pid;
+            public string Kind;      // MOUSE, KEYBOARD, HEADSET и т. п.
+            public string Name;
+            public int Percent;
+        }
+
+        private static readonly TimeSpan CacheTime = TimeSpan.FromMinutes(5);
+        private static List<Entry> _cache = new List<Entry>();
         private static DateTime _read = DateTime.MinValue;
 
-        /// <summary>Заряд по коду модели устройства: ключ — PID, значение — проценты.</summary>
-        public static Dictionary<ushort, int> Read()
+        /// <summary>Что знает G HUB о заряде подключённых к нему устройств.</summary>
+        public static List<Entry> Read()
         {
             if (DateTime.Now - _read < CacheTime) return _cache;
             _read = DateTime.Now;
@@ -33,14 +41,14 @@ namespace USBofon
             }
             catch
             {
-                _cache = new Dictionary<ushort, int>();
+                _cache = new List<Entry>();
             }
             return _cache;
         }
 
-        private static Dictionary<ushort, int> Query()
+        private static List<Entry> Query()
         {
-            var result = new Dictionary<ushort, int>();
+            var result = new List<Entry>();
             if (!PortOpen()) return result;      // G HUB не запущен — не ждём соединения впустую
 
             var devices = Ask("/devices/list");
@@ -54,8 +62,20 @@ namespace USBofon
                 var state = Ask("/battery/" + id + "/state");
                 if (state == null) continue;
                 var percent = Regex.Match(state, @"""percentage"":\s*([0-9]+)");
-                if (percent.Success && int.TryParse(percent.Groups[1].Value, out var value) && value >= 0 && value <= 100)
-                    result[pid] = value;
+                if (!percent.Success || !int.TryParse(percent.Groups[1].Value, out var value) || value < 0 || value > 100)
+                    continue;
+
+                // Тип и название берём из описания устройства: по ним сопоставим приёмник с его мышью.
+                var tail = devices.Substring(match.Index, Math.Min(3000, devices.Length - match.Index));
+                var kind = Regex.Match(tail, @"""deviceType"":\s*""([A-Z_]+)""");
+                var name = Regex.Match(tail, @"""displayName"":\s*""([^""]+)""");
+                result.Add(new Entry
+                {
+                    Pid = pid,
+                    Kind = kind.Success ? kind.Groups[1].Value : "",
+                    Name = name.Success ? name.Groups[1].Value : "",
+                    Percent = value,
+                });
             }
             return result;
         }

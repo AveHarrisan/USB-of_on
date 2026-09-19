@@ -630,6 +630,8 @@ namespace USBofon
         private async void RefreshDevices()
         {
             if (_refreshing) { _refreshPending = true; return; }
+            // Пока окно спрятано и виджета нет, заряд не спрашиваем: незачем будить устройства.
+            DeviceManager.PollBattery = Visible || Settings.WidgetVisible;
             _refreshing = true;
             _status.Text = "Обновление…";
             try

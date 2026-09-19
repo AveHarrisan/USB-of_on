@@ -26,13 +26,18 @@ namespace USBofon
             ("BTHLEDEVICE", "Bluetooth"),
         };
 
+        /// <summary>Спрашивать ли заряд. Выключается, когда окно скрыто и виджет не показан.</summary>
+        public static bool PollBattery = true;
+
         /// <summary>Все устройства: подключённые сейчас и те, что Windows помнит с прошлых подключений.</summary>
         public static List<UsbDevice> Enumerate()
         {
             var present = EnumeratePresentNodes();
             var letters = GetDriveLettersByDisk();
-            var battery = Battery.Read();
-            var ghub = GHubBattery.Read();
+            // Пока G HUB запущен, заряд берём у него: он и так опрашивает устройства,
+            // а наши запросы по HID++ будили бы уснувшую мышь.
+            var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
+            var battery = PollBattery && ghub.Count == 0 ? Battery.Read() : new Dictionary<uint, int>();
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
                 Enumerate(bus.Enumerator, bus.Bus, present, letters, battery, ghub, result);
@@ -40,7 +45,7 @@ namespace USBofon
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, Dictionary<ushort, int> ghub,
+            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, List<GHubBattery.Entry> ghub,
             List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
@@ -94,14 +99,28 @@ namespace USBofon
             }
         }
 
-        /// <summary>Последняя надежда: заряд, который знает G HUB (гарнитуры Logitech).</summary>
-        private static int? FromGHub(UsbDevice dev, Dictionary<ushort, int> ghub)
+        /// <summary>
+        /// Заряд, который знает G HUB. Сначала ищем устройство по коду модели, а если не совпало —
+        /// по типу: мышь за приёмником Logitech видна системе как приёмник, а G HUB знает её как мышь.
+        /// </summary>
+        private static int? FromGHub(UsbDevice dev, List<GHubBattery.Entry> ghub)
         {
-            if (ghub.Count == 0 || dev.Pid == null) return null;
-            return ushort.TryParse(dev.Pid, System.Globalization.NumberStyles.HexNumber, null, out var pid)
-                   && ghub.TryGetValue(pid, out var percent)
-                ? (int?)percent
+            if (ghub.Count == 0 || !string.Equals(dev.Vid, "046D", StringComparison.OrdinalIgnoreCase)) return null;
+
+            if (ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid))
+            {
+                var exact = ghub.FirstOrDefault(e => e.Pid == pid);
+                if (exact != null) return exact.Percent;
+            }
+
+            var kind = DevicePresentation.Kind(dev);
+            var wanted = kind == DeviceKind.Keyboard ? new[] { "MOUSE", "KEYBOARD" }
+                : kind == DeviceKind.Audio ? new[] { "HEADSET" }
                 : null;
+            if (wanted == null) return null;
+
+            var guess = ghub.FirstOrDefault(e => Array.IndexOf(wanted, e.Kind) >= 0);
+            return guess?.Percent;
         }
 
         /// <summary>Заряд ищем и у самого устройства, и у его HID-интерфейсов.</summary>
