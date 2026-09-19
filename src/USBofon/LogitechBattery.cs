@@ -23,6 +23,10 @@ namespace USBofon
         private static readonly Dictionary<uint, (int Percent, DateTime Read)> Cache =
             new Dictionary<uint, (int, DateTime)>();
 
+        // Устройства, которые на HID++ не отвечают (звуковые коллекции, чужие приёмники),
+        // не дёргаем каждый раз: иначе опрос растягивается на секунды.
+        private static readonly Dictionary<uint, DateTime> Silent = new Dictionary<uint, DateTime>();
+
         /// <summary>Дописывает найденный заряд в общую таблицу «узел устройства → проценты».</summary>
         public static void Read(Dictionary<uint, int> result, IEnumerable<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength)> interfaces)
         {
@@ -37,11 +41,19 @@ namespace USBofon
                     continue;
                 }
 
+                if (Silent.TryGetValue(iface.DevInst, out var silentSince) && DateTime.Now - silentSince < CacheTime)
+                    continue;
+
                 var percent = Query(iface.Path);
                 if (percent.HasValue)
                 {
+                    Silent.Remove(iface.DevInst);
                     Cache[iface.DevInst] = (percent.Value, DateTime.Now);
                     result[iface.DevInst] = percent.Value;
+                }
+                else
+                {
+                    Silent[iface.DevInst] = DateTime.Now;
                 }
             }
         }
@@ -97,13 +109,14 @@ namespace USBofon
             request[6] = p2;
             if (!Write(handle, request)) return null;
 
-            var deadline = DateTime.Now.AddMilliseconds(600);
+            // В канале идут и чужие кадры (их шлёт G HUB), поэтому ждём именно свой ответ.
+            var deadline = DateTime.Now.AddMilliseconds(900);
             while (DateTime.Now < deadline)
             {
                 var answer = Read(handle, 250);
-                if (answer == null) return null;
-                if (answer[1] != device) continue;          // ответ другому устройству приёмника
-                if (answer[2] == 0xFF) return null;         // устройство ответило ошибкой
+                if (answer == null) continue;
+                if (answer[1] != device) continue;                       // ответ другому устройству приёмника
+                if (answer[2] == 0xFF && answer[4] == featureIndex) return null;   // ошибка на наш запрос
                 if (answer[2] == featureIndex && answer[3] == function) return answer;
             }
             return null;
