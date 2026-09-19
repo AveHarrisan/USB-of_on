@@ -26,13 +26,14 @@ namespace USBofon
             public int Percent;
         }
 
-        private static readonly TimeSpan CacheTime = TimeSpan.FromMinutes(5);
+        private static TimeSpan CacheTime => TimeSpan.FromMinutes(Settings.BatteryMinutes);
         private static List<Entry> _cache = new List<Entry>();
         private static DateTime _read = DateTime.MinValue;
 
         /// <summary>Что знает G HUB о заряде подключённых к нему устройств.</summary>
         public static List<Entry> Read()
         {
+            if (!Settings.UseGHub) return new List<Entry>();
             if (DateTime.Now - _read < CacheTime) return _cache;
             _read = DateTime.Now;
             try

@@ -13,7 +13,7 @@ namespace USBofon
     /// </summary>
     internal static class RazerBattery
     {
-        private static readonly TimeSpan CacheTime = TimeSpan.FromMinutes(5);
+        private static TimeSpan CacheTime => TimeSpan.FromMinutes(Settings.BatteryMinutes);
         private static List<(string Name, int Percent)> _cache = new List<(string, int)>();
         private static DateTime _read = DateTime.MinValue;
 
@@ -24,6 +24,7 @@ namespace USBofon
 
         public static List<(string Name, int Percent)> Read()
         {
+            if (!Settings.UseSynapse) return new List<(string, int)>();
             if (DateTime.Now - _read < CacheTime) return _cache;
             _read = DateTime.Now;
             try { _cache = Parse(); }

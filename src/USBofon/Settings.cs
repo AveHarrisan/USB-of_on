@@ -28,6 +28,68 @@ namespace USBofon
         }
 
 
+        /// <summary>Виджет без подложки: только текст поверх обоев.</summary>
+        public static bool WidgetTransparent
+        {
+            get => GetFlag("WidgetTransparent");
+            set => SetFlag("WidgetTransparent", value);
+        }
+
+        /// <summary>Непрозрачность виджета, 40–100 %.</summary>
+        public static int WidgetOpacity
+        {
+            get => Clamp(GetNumber("WidgetOpacity", 92), 40, 100);
+            set => SetNumber("WidgetOpacity", Clamp(value, 40, 100));
+        }
+
+        /// <summary>Что показывать в виджете: 0 — только с зарядом, 1 — с зарядом и подписанные, 2 — всё подключённое.</summary>
+        public static int WidgetContent
+        {
+            get => Clamp(GetNumber("WidgetContent", 1), 0, 2);
+            set => SetNumber("WidgetContent", Clamp(value, 0, 2));
+        }
+
+        /// <summary>Как часто обновлять заряд, минуты.</summary>
+        public static int BatteryMinutes
+        {
+            get => Clamp(GetNumber("BatteryMinutes", 5), 1, 60);
+            set => SetNumber("BatteryMinutes", Clamp(value, 1, 60));
+        }
+
+        public static bool UseGHub
+        {
+            get => GetFlag("UseGHub", true);
+            set => SetFlag("UseGHub", value);
+        }
+
+        public static bool UseSynapse
+        {
+            get => GetFlag("UseSynapse", true);
+            set => SetFlag("UseSynapse", value);
+        }
+
+        private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+
+        private static int GetNumber(string name, int fallback)
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(Key))
+                    return k?.GetValue(name) is int v ? v : fallback;
+            }
+            catch { return fallback; }
+        }
+
+        private static void SetNumber(string name, int value)
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.CreateSubKey(Key))
+                    k?.SetValue(name, value, RegistryValueKind.DWord);
+            }
+            catch { }
+        }
+
         public static bool WidgetVisible
         {
             get => GetFlag("WidgetVisible");
