@@ -55,9 +55,9 @@ namespace USBofon
             root.Controls.Add(Check("Закрепить виджет",
                 "Закреплённый виджет не ловит мышь: щелчки проходят сквозь него, случайно ничего не нажать",
                 () => Settings.WidgetLocked, v => Settings.WidgetLocked = v));
-            root.Controls.Add(Check("Без подложки — только текст",
-                "Виджет становится прозрачным, остаётся лишь текст с тенью",
-                () => Settings.WidgetTransparent, v => Settings.WidgetTransparent = v));
+            root.Controls.Add(Slider("Плотность подложки", 0, 100, 5,
+                () => Settings.WidgetBackground, v => Settings.WidgetBackground = v,
+                v => v == 0 ? "без подложки" : v + " %"));
             root.Controls.Add(Slider("Непрозрачность", 40, 100, 5,
                 () => Settings.WidgetOpacity, v => Settings.WidgetOpacity = v, v => v + " %"));
             root.Controls.Add(Choice("Что показывать в виджете", new[]

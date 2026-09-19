@@ -2,19 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace USBofon
 {
     /// <summary>
-    /// Виджет на рабочем столе: заряд и состояние устройств. В заблокированном виде не ловит мышь —
-    /// щелчки проходят сквозь него, случайно ничего не нажать. Блокировка снимается из меню в трее.
+    /// Виджет на рабочем столе: заряд и состояние устройств. Рисуется слоем с попиксельной прозрачностью,
+    /// поэтому подложку можно сделать сколь угодно бледной, а текст останется чётким.
+    /// Закреплённый виджет не ловит мышь — щелчки проходят сквозь него.
     /// </summary>
     internal sealed class WidgetForm : Form
     {
         private const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000;
         private const int WM_NCHITTEST = 0x84, HTCAPTION = 2;
+        private const int ULW_ALPHA = 2;
 
         private List<(string Title, string Note, int? Battery, Color Accent, bool Disabled)> _rows =
             new List<(string, string, int?, Color, bool)>();
@@ -29,9 +33,7 @@ namespace USBofon
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            ApplyLook();
-            Size = new Size(260, 140);
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(280, 140);
 
             var position = Settings.WidgetPosition;
             Location = position ?? new Point(
@@ -54,37 +56,13 @@ namespace USBofon
             }
         }
 
-        /// <summary>Подложка, прозрачность — по настройкам. Без подложки виджет показывает только текст.</summary>
-        public void ApplyLook()
-        {
-            if (Settings.WidgetTransparent)
-            {
-                // Цвет-ключ: всё, что закрашено им, окно не рисует вовсе.
-                BackColor = Color.Magenta;
-                TransparencyKey = Color.Magenta;
-            }
-            else
-            {
-                BackColor = Color.FromArgb(17, 24, 39);
-                TransparencyKey = Color.Empty;
-            }
-            Opacity = Settings.WidgetOpacity / 100.0;
-            Invalidate();
-        }
+        public void ApplyLook() => Redraw();
 
         public void ApplyLock()
         {
-            // Стиль «сквозной для мыши» задаётся при создании окна — пересоздаём его.
+            // «Сквозной для мыши» задаётся при создании окна — пересоздаём его.
             if (IsHandleCreated) RecreateHandle();
-            Invalidate();
-        }
-
-        /// <summary>Перетаскивание за любое место — заголовка у виджета нет.</summary>
-        protected override void WndProc(ref Message m)
-        {
-            base.WndProc(ref m);
-            if (m.Msg == WM_NCHITTEST && !Settings.WidgetLocked && m.Result == (IntPtr)1)
-                m.Result = (IntPtr)HTCAPTION;
+            Redraw();
         }
 
         public void Update(IList<(UsbDevice Dev, SavedDevice Saved)> devices)
@@ -98,61 +76,80 @@ namespace USBofon
                 rows.Add((title, note, dev.Battery, DevicePresentation.Accent(kind), dev.Disabled));
             }
             _rows = rows;
-            Height = Math.Max(90, 46 + Math.Max(rows.Count, 1) * 34 + 10);
-            Width = ContentWidth(rows);
-            Invalidate();
+            Redraw();
         }
 
-        /// <summary>Текст с тенью, когда подложки нет: иначе он пропадает на светлых обоях.</summary>
-        private static void Draw(Graphics g, string text, Font font, Rectangle bounds, Color color, bool shadow)
+        protected override void OnShown(EventArgs e)
         {
-            const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            if (shadow)
+            base.OnShown(e);
+            Redraw();
+        }
+
+        /// <summary>Перетаскивание за любое место — заголовка у виджета нет.</summary>
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == WM_NCHITTEST && !Settings.WidgetLocked && m.Result == (IntPtr)1)
+                m.Result = (IntPtr)HTCAPTION;
+        }
+
+        private bool ShowHeader => !Settings.WidgetLocked;
+
+        private void Redraw()
+        {
+            if (!IsHandleCreated || !Visible) return;
+
+            var top = ShowHeader ? 40 : 12;
+            var height = top + Math.Max(_rows.Count, 1) * 34 + 8;
+            var width = ContentWidth();
+            if (Width != width || Height != height) Size = new Size(width, height);
+
+            using (var bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
             {
-                var under = new Rectangle(bounds.X + 1, bounds.Y + 1, bounds.Width, bounds.Height);
-                TextRenderer.DrawText(g, text, font, under, Color.FromArgb(20, 20, 20), flags);
-            }
-            TextRenderer.DrawText(g, text, font, bounds, color, flags);
-        }
-
-        /// <summary>Ширина по самому длинному названию, чтобы имена не обрезались.</summary>
-        private int ContentWidth(List<(string Title, string Note, int? Battery, Color Accent, bool Disabled)> rows)
-        {
-            var longest = 0;
-            using (var g = CreateGraphics())
-                foreach (var row in rows)
+                using (var g = Graphics.FromImage(bitmap))
                 {
-                    longest = Math.Max(longest, TextRenderer.MeasureText(g, row.Title, TitleFont).Width);
-                    longest = Math.Max(longest, TextRenderer.MeasureText(g, row.Note, NoteFont).Width);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    Paint(g, top);
                 }
-            // 30 слева под кружок, справа место под полосу заряда и проценты
-            return Math.Min(Math.Max(longest + 30 + 110, 240), 460);
+                Push(bitmap);
+            }
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        private void Paint(Graphics g, int top)
         {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(BackColor);
-            var plain = Settings.WidgetTransparent;   // без подложки текст пишем с тенью, иначе он теряется на обоях
+            var opacity = Settings.WidgetOpacity / 100.0;
+            var backAlpha = (int)Math.Round(255 * (Settings.WidgetBackground / 100.0) * opacity);
+            var textAlpha = (int)Math.Round(255 * opacity);
 
-            var head = Settings.WidgetLocked ? "USB-of_on  ·  закреплён" : "USB-of_on  ·  перетащите мышью";
-            Draw(g, head, HeadFont, new Rectangle(14, 12, Width - 28, 18), Color.FromArgb(148, 163, 184), plain);
+            Color Text(Color color) => Color.FromArgb(textAlpha, color);
 
-            var y = 40;
+            if (backAlpha > 0)
+                using (var back = new SolidBrush(Color.FromArgb(backAlpha, 17, 24, 39)))
+                using (var path = Rounded(new Rectangle(0, 0, Width - 1, Height - 1), 10))
+                    g.FillPath(back, path);
+
+            // Тень под текстом нужна, когда подложка почти прозрачная: иначе текст теряется на обоях.
+            var shadow = backAlpha < 140;
+
+            var y = top;
+            if (ShowHeader)
+                Draw(g, "USB-of_on  ·  перетащите мышью", HeadFont, new RectangleF(14, 12, Width - 28, 18),
+                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
+
             if (_rows.Count == 0)
             {
-                Draw(g, "Нет устройств для показа", NoteFont, new Rectangle(14, y, Width - 28, 20),
-                    Color.FromArgb(148, 163, 184), plain);
+                Draw(g, "Нет устройств для показа", NoteFont, new RectangleF(14, y, Width - 28, 20),
+                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
                 return;
             }
 
             foreach (var row in _rows)
             {
-                using (var b = new SolidBrush(row.Accent))
-                    g.FillEllipse(b, 14, y + 8, 8, 8);
+                using (var dot = new SolidBrush(Text(row.Accent)))
+                    g.FillEllipse(dot, 14, y + 8, 8, 8);
 
-                var right = Width - 14;
+                var right = (float)Width - 14;
                 if (row.Battery.HasValue)
                 {
                     var percent = row.Battery.Value;
@@ -160,29 +157,119 @@ namespace USBofon
                         : percent <= 35 ? Color.FromArgb(251, 191, 36)
                         : Color.FromArgb(74, 222, 128);
                     var text = percent + "%";
-                    var size = TextRenderer.MeasureText(g, text, TitleFont);
-                    Draw(g, text, TitleFont, new Rectangle(right - size.Width, y + 2, size.Width + 2, 20), color, plain);
+                    var size = g.MeasureString(text, TitleFont);
+                    Draw(g, text, TitleFont, new RectangleF(right - size.Width, y + 1, size.Width + 2, 20), Text(color), shadow, textAlpha);
                     right -= size.Width + 8;
 
-                    var bar = new Rectangle(right - 42, y + 8, 42, 8);
-                    using (var b = new SolidBrush(Color.FromArgb(55, 65, 81)))
-                        g.FillRectangle(b, bar);
-                    using (var b = new SolidBrush(color))
-                        g.FillRectangle(b, bar.Left, bar.Top, Math.Max(2, bar.Width * percent / 100), bar.Height);
+                    var bar = new RectangleF(right - 42, y + 8, 42, 8);
+                    using (var empty = new SolidBrush(Color.FromArgb(Math.Max(textAlpha / 3, 40), 148, 163, 184)))
+                        g.FillRectangle(empty, bar);
+                    using (var full = new SolidBrush(Text(color)))
+                        g.FillRectangle(full, bar.X, bar.Y, Math.Max(2, bar.Width * percent / 100f), bar.Height);
                     right -= 50;
                 }
                 else if (row.Disabled)
                 {
-                    var size = TextRenderer.MeasureText(g, "выкл", NoteFont);
-                    Draw(g, "выкл", NoteFont, new Rectangle(right - size.Width, y + 4, size.Width + 2, 18),
-                        Color.FromArgb(248, 113, 113), plain);
+                    var size = g.MeasureString("выкл", NoteFont);
+                    Draw(g, "выкл", NoteFont, new RectangleF(right - size.Width, y + 4, size.Width + 2, 18),
+                        Text(Color.FromArgb(248, 113, 113)), shadow, textAlpha);
                     right -= size.Width + 8;
                 }
 
-                Draw(g, row.Title, TitleFont, new Rectangle(30, y, right - 34, 18), Color.White, plain);
-                Draw(g, row.Note, NoteFont, new Rectangle(30, y + 16, right - 34, 16), Color.FromArgb(148, 163, 184), plain);
+                Draw(g, row.Title, TitleFont, new RectangleF(30, y, right - 34, 18), Text(Color.White), shadow, textAlpha);
+                Draw(g, row.Note, NoteFont, new RectangleF(30, y + 16, right - 34, 16),
+                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
                 y += 34;
             }
         }
+
+        private static void Draw(Graphics g, string text, Font font, RectangleF bounds, Color color, bool shadow, int alpha)
+        {
+            using (var format = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter })
+            {
+                if (shadow)
+                    using (var under = new SolidBrush(Color.FromArgb(Math.Min(alpha, 190), 0, 0, 0)))
+                        g.DrawString(text, font, under, new RectangleF(bounds.X + 1, bounds.Y + 1, bounds.Width, bounds.Height), format);
+                using (var brush = new SolidBrush(color))
+                    g.DrawString(text, font, brush, bounds, format);
+            }
+        }
+
+        /// <summary>Ширина по самому длинному названию, чтобы имена не обрезались.</summary>
+        private int ContentWidth()
+        {
+            var longest = 0f;
+            using (var g = CreateGraphics())
+            {
+                foreach (var row in _rows)
+                {
+                    longest = Math.Max(longest, g.MeasureString(row.Title, TitleFont).Width);
+                    longest = Math.Max(longest, g.MeasureString(row.Note, NoteFont).Width);
+                }
+                if (ShowHeader)
+                    longest = Math.Max(longest, g.MeasureString("USB-of_on  ·  перетащите мышью", HeadFont).Width - 80);
+            }
+            return (int)Math.Min(Math.Max(longest + 30 + 110, 240), 460);
+        }
+
+        /// <summary>Отдаёт готовую картинку окну: так работает попиксельная прозрачность.</summary>
+        private void Push(Bitmap bitmap)
+        {
+            var screen = GetDC(IntPtr.Zero);
+            var memory = CreateCompatibleDC(screen);
+            var handle = bitmap.GetHbitmap(Color.FromArgb(0));
+            var old = SelectObject(memory, handle);
+            try
+            {
+                var size = new SIZE { cx = bitmap.Width, cy = bitmap.Height };
+                var source = new POINT { x = 0, y = 0 };
+                var position = new POINT { x = Left, y = Top };
+                var blend = new BLENDFUNCTION
+                {
+                    BlendOp = 0,
+                    BlendFlags = 0,
+                    SourceConstantAlpha = 255,
+                    AlphaFormat = 1,
+                };
+                UpdateLayeredWindow(Handle, screen, ref position, ref size, memory, ref source, 0, ref blend, ULW_ALPHA);
+            }
+            finally
+            {
+                SelectObject(memory, old);
+                DeleteObject(handle);
+                DeleteDC(memory);
+                ReleaseDC(IntPtr.Zero, screen);
+            }
+        }
+
+        private static GraphicsPath Rounded(Rectangle r, int radius)
+        {
+            var d = radius * 2;
+            var p = new GraphicsPath();
+            p.AddArc(r.Left, r.Top, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        [StructLayout(LayoutKind.Sequential)] private struct SIZE { public int cx, cy; }
+        [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; }
+        [StructLayout(LayoutKind.Sequential)] private struct BLENDFUNCTION
+        {
+            public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UpdateLayeredWindow(IntPtr window, IntPtr screenDc, ref POINT position, ref SIZE size,
+            IntPtr sourceDc, ref POINT source, int key, ref BLENDFUNCTION blend, int flags);
+
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr dc);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr obj);
     }
 }

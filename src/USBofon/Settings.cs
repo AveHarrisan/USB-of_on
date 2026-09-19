@@ -28,11 +28,11 @@ namespace USBofon
         }
 
 
-        /// <summary>Виджет без подложки: только текст поверх обоев.</summary>
-        public static bool WidgetTransparent
+        /// <summary>Плотность подложки виджета, 0–100 %: 0 — только текст поверх обоев.</summary>
+        public static int WidgetBackground
         {
-            get => GetFlag("WidgetTransparent");
-            set => SetFlag("WidgetTransparent", value);
+            get => Clamp(GetNumber("WidgetBackground", 85), 0, 100);
+            set => SetNumber("WidgetBackground", Clamp(value, 0, 100));
         }
 
         /// <summary>Непрозрачность виджета, 40–100 %.</summary>
