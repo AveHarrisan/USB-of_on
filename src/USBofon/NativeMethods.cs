@@ -128,6 +128,9 @@ namespace USBofon
         public static extern uint CM_Get_DevNode_Status(out uint status, out uint problemNumber, uint devInst, uint flags);
 
         [DllImport("cfgmgr32.dll")]
+        public static extern uint CM_Get_Parent(out uint parent, uint devInst, uint flags);
+
+        [DllImport("cfgmgr32.dll")]
         public static extern uint CM_Get_Child(out uint child, uint devInst, uint flags);
 
         [DllImport("cfgmgr32.dll")]

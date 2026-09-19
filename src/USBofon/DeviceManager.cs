@@ -16,6 +16,7 @@ namespace USBofon
             public string InstanceId;
             public string Description;
             public string ClassName;
+            public int? Battery;
         }
 
         // Bluetooth-мыши и клавиатуры идут не через USB, но в списке им самое место.
@@ -37,14 +38,18 @@ namespace USBofon
             // Устройства сами мы не опрашиваем: заряд берём у Windows (Bluetooth) и у G HUB,
             // который и так знает его для своего окна. Спящая мышь от этого не просыпается.
             var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
+            var razer = PollBattery ? RazerBattery.Read() : new List<(string Name, int Percent)>();
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, razer, result);
+
+            AddDevicesWithBattery(present, result);
             return result;
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub, List<UsbDevice> result)
+            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub,
+            List<(string Name, int Percent)> razer, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -82,7 +87,10 @@ namespace USBofon
                     {
                         CollectChildren(dev, dev.DevInst, present, letters, 0);
                         if (!dev.IsHub)
-                            dev.Battery = Battery.ReadBluetooth(set, ref data) ?? FromGHub(dev, ghub);
+                            dev.Battery = Battery.ReadBluetooth(set, ref data)
+                                ?? ChildBattery(dev.DevInst, present, 0)
+                                ?? FromGHub(dev, ghub)
+                                ?? RazerBattery.For(dev, razer);
                     }
 
                     result.Add(dev);
@@ -91,6 +99,72 @@ namespace USBofon
             finally
             {
                 SetupDiDestroyDeviceInfoList(set);
+            }
+        }
+
+        /// <summary>Заряд, который Windows знает у частей устройства: например, у Bluetooth-клавиатуры внутри составного.</summary>
+        private static int? ChildBattery(uint devInst, Dictionary<uint, NodeInfo> present, int depth)
+        {
+            if (depth > 4 || CM_Get_Child(out var child, devInst, 0) != CR_SUCCESS) return null;
+            do
+            {
+                if (present.TryGetValue(child, out var info) && info.Battery.HasValue) return info.Battery;
+                var deeper = ChildBattery(child, present, depth + 1);
+                if (deeper.HasValue) return deeper;
+            } while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
+            return null;
+        }
+
+        /// <summary>
+        /// Устройства с зарядом, которые не попали в список по шине: игровые контроллеры, перья и прочее,
+        /// подключённое мимо USB и Bluetooth. Заряд берётся из готового свойства Windows.
+        /// </summary>
+        private static void AddDevicesWithBattery(Dictionary<uint, NodeInfo> present, List<UsbDevice> result)
+        {
+            var known = new HashSet<uint>(result.Select(d => d.DevInst));
+            foreach (var pair in present)
+            {
+                if (!pair.Value.Battery.HasValue || known.Contains(pair.Key)) continue;
+                if (CoveredByParent(pair.Key, known)) continue;
+
+                var id = pair.Value.InstanceId ?? "";
+                var bus = id.Split(new[] { '\\' }, 2, StringSplitOptions.None)[0];
+                result.Add(new UsbDevice
+                {
+                    DevInst = pair.Key,
+                    InstanceId = id,
+                    Description = pair.Value.Description ?? id,
+                    ClassName = pair.Value.ClassName,
+                    Bus = BusName(bus),
+                    Present = true,
+                    Battery = pair.Value.Battery,
+                });
+            }
+        }
+
+        /// <summary>Часть уже показанного устройства отдельной строкой не показываем.</summary>
+        private static bool CoveredByParent(uint devInst, HashSet<uint> known)
+        {
+            var node = devInst;
+            for (var depth = 0; depth < 8; depth++)
+            {
+                if (CM_Get_Parent(out var parent, node, 0) != CR_SUCCESS) return false;
+                if (known.Contains(parent)) return true;
+                node = parent;
+            }
+            return false;
+        }
+
+        private static string BusName(string enumerator)
+        {
+            switch (enumerator.ToUpperInvariant())
+            {
+                case "USB": return "USB";
+                case "BTHENUM":
+                case "BTHLE":
+                case "BTHLEDEVICE": return "Bluetooth";
+                case "HID": return "HID";
+                default: return enumerator;
             }
         }
 
@@ -233,6 +307,8 @@ namespace USBofon
                         Description = FirstNonEmpty(GetRegString(set, ref data, SPDRP_FRIENDLYNAME),
                             GetRegString(set, ref data, SPDRP_DEVICEDESC)),
                         ClassName = GetRegString(set, ref data, SPDRP_CLASS),
+                        // Заряд, который Windows уже знает: своих запросов к устройству нет.
+                        Battery = Battery.ReadBluetooth(set, ref data),
                     };
                 }
             }
