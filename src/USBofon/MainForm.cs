@@ -208,6 +208,10 @@ namespace USBofon
         private ToolStripDropDownButton BuildSettingsMenu()
         {
             var button = new ToolStripDropDownButton("Настройки") { Alignment = ToolStripItemAlignment.Right };
+            var advanced = new ToolStripMenuItem("Все настройки…", null, (s, e) => ShowSettings())
+            {
+                Font = new Font(button.Font, FontStyle.Bold),
+            };
             var autostart = new ToolStripMenuItem("Запускать при входе в Windows") { CheckOnClick = false };
             var minimized = new ToolStripMenuItem("Запускаться в трее") { CheckOnClick = false, ToolTipText = "При автозапуске окно не открывается — только значок в трее" };
 
@@ -268,7 +272,7 @@ namespace USBofon
             };
             button.DropDownOpening += (s, e) => namedOnly.Checked = Settings.NamedOnly;
 
-            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
+            button.DropDownItems.AddRange(new ToolStripItem[] { advanced, new ToolStripSeparator(), namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
             return button;
         }
 
@@ -410,6 +414,31 @@ namespace USBofon
             }
         }
 
+        /// <summary>Окно со всеми настройками. Изменения применяются сразу.</summary>
+        private void ShowSettings()
+        {
+            using (var form = new SettingsForm(ApplySettings))
+                form.ShowDialog(this);
+        }
+
+        private void ApplySettings()
+        {
+            if (Settings.WidgetVisible)
+            {
+                if (_widget == null || _widget.IsDisposed) ShowWidget(true);
+                else
+                {
+                    _widget.ApplyLook();
+                    _widget.ApplyLock();
+                }
+            }
+            else if (_widget != null)
+            {
+                ShowWidget(false);
+            }
+            FillList();
+        }
+
         private void ShowAbout()
         {
             using (_about = new AboutForm(CheckUpdates))
@@ -546,11 +575,14 @@ namespace USBofon
         private void UpdateWidget()
         {
             if (_widget == null || _widget.IsDisposed) return;
+            var content = Settings.WidgetContent;
             var rows = _devices
                 .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
                 .Where(x => x.Dev.Present && !x.Dev.IsHub && !x.Dev.IsInterface)
                 .Where(x => x.Saved?.Hidden != true)
-                .Where(x => x.Dev.Battery.HasValue || !string.IsNullOrEmpty(x.Saved?.Name))
+                .Where(x => content == 2
+                            || (content == 1 && (x.Dev.Battery.HasValue || !string.IsNullOrEmpty(x.Saved?.Name)))
+                            || (content == 0 && x.Dev.Battery.HasValue))
                 .OrderByDescending(x => x.Dev.Battery.HasValue)
                 .ThenBy(x => x.Dev.Battery ?? 0)
                 .ToList();
