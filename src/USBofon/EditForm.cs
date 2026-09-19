@@ -47,6 +47,21 @@ namespace USBofon
             _note.Height = 60;
             _note.ScrollBars = ScrollBars.Vertical;
 
+            var reset = new Button
+            {
+                Text = "Вернуть имя по умолчанию",
+                AutoSize = true,
+                Visible = !string.IsNullOrEmpty(saved?.Name),
+                Margin = new Padding(0, 0, 12, 0),
+            };
+            reset.Click += (s, e) =>
+            {
+                // Имя убираем, заметку оставляем — она про устройство, а не про название.
+                _name.Text = "";
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+
             var ok = new Button { Text = "Сохранить", DialogResult = DialogResult.OK, AutoSize = true };
             var cancel = new Button { Text = "Отмена", DialogResult = DialogResult.Cancel, AutoSize = true };
             var buttons = new FlowLayoutPanel
@@ -58,6 +73,7 @@ namespace USBofon
             };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(ok);
+            buttons.Controls.Add(reset);
 
             layout.Controls.Add(info);
             layout.Controls.Add(new Label { Text = "Имя (например, организация):", AutoSize = true });

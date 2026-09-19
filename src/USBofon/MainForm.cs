@@ -165,12 +165,22 @@ namespace USBofon
 
             var menu = new ContextMenuStrip();
             _miRename = new ToolStripMenuItem("Имя и заметка…", null, (s, e) => RenameSelected());
+            var miReset = new ToolStripMenuItem("Вернуть имя по умолчанию", null, (s, e) =>
+            {
+                var selected = SelectedDevices();
+                if (selected.Count == 1) ResetName(selected[0]);
+            });
+            menu.Opening += (s, e) =>
+            {
+                var selected = SelectedDevices();
+                miReset.Visible = selected.Count == 1 && !string.IsNullOrEmpty(_store.Find(selected[0].InstanceId)?.Name);
+            };
             _miHide = new ToolStripMenuItem("Скрыть", null, (s, e) => ToggleHiddenSelected());
             _miEnable = new ToolStripMenuItem("Включить", null, (s, e) => SetEnabledSelected(true));
             _miDisable = new ToolStripMenuItem("Выключить", null, (s, e) => SetEnabledSelected(false));
             menu.Items.AddRange(new ToolStripItem[]
             {
-                _miRename, _miHide, new ToolStripSeparator(), _miEnable, _miDisable, new ToolStripSeparator(),
+                _miRename, miReset, _miHide, new ToolStripSeparator(), _miEnable, _miDisable, new ToolStripSeparator(),
                 new ToolStripMenuItem("Копировать сведения", null, (s, e) => CopySelected()),
             });
             _list.ContextMenuStrip = menu;
@@ -302,6 +312,8 @@ namespace USBofon
             var list = new List<UsbDevice> { dev };
             var menu = new ContextMenuStrip();
             menu.Items.Add(new ToolStripMenuItem(string.IsNullOrEmpty(saved?.Name) ? "Дать имя…" : "Переименовать…", null, (s, e) => RenameDevice(dev)));
+            if (!string.IsNullOrEmpty(saved?.Name))
+                menu.Items.Add(new ToolStripMenuItem("Вернуть имя по умолчанию", null, (s, e) => ResetName(dev)));
             if (dev.Present && !dev.IsHub)
                 menu.Items.Add(new ToolStripMenuItem(dev.Disabled ? "Включить" : "Выключить", null, (s, e) => SetEnabled(list, dev.Disabled, confirm: false)));
             menu.Items.Add(new ToolStripMenuItem(saved?.Hidden == true ? "Показать в списке" : "Скрыть из списка", null, (s, e) => ToggleHidden(list)));
@@ -820,6 +832,21 @@ namespace USBofon
                 if (dev.Present) saved.LastSeen = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
                 _store.RemoveIfEmpty(dev.InstanceId);
             }
+            TrySave();
+            FillList();
+        }
+
+        /// <summary>Убирает данное имя: устройство снова показывается под своим названием.</summary>
+        private void ResetName(UsbDevice dev)
+        {
+            var saved = _store.Find(dev.InstanceId);
+            if (saved == null || string.IsNullOrEmpty(saved.Name)) return;
+            if (MessageBox.Show(this, $"Вернуть устройству его собственное название?\r\n\r\n«{saved.Name}» → «{DevicePresentation.FriendlyName(dev)}»",
+                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            saved.Name = null;
+            _store.RemoveIfEmpty(dev.InstanceId);
             TrySave();
             FillList();
         }
