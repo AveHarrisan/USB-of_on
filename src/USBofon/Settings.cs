@@ -27,6 +27,49 @@ namespace USBofon
             set => SetFlag("NotifyConnected", value);
         }
 
+        public static bool WidgetVisible
+        {
+            get => GetFlag("WidgetVisible");
+            set => SetFlag("WidgetVisible", value);
+        }
+
+        public static bool WidgetLocked
+        {
+            get => GetFlag("WidgetLocked");
+            set => SetFlag("WidgetLocked", value);
+        }
+
+        /// <summary>Где стоит виджет; null — ещё не ставили.</summary>
+        public static System.Drawing.Point? WidgetPosition
+        {
+            get
+            {
+                try
+                {
+                    using (var k = Registry.CurrentUser.OpenSubKey(Key))
+                    {
+                        if (k?.GetValue("WidgetX") is int x && k.GetValue("WidgetY") is int y)
+                            return new System.Drawing.Point(x, y);
+                    }
+                }
+                catch { }
+                return null;
+            }
+            set
+            {
+                if (value == null) return;
+                try
+                {
+                    using (var k = Registry.CurrentUser.CreateSubKey(Key))
+                    {
+                        k?.SetValue("WidgetX", value.Value.X, RegistryValueKind.DWord);
+                        k?.SetValue("WidgetY", value.Value.Y, RegistryValueKind.DWord);
+                    }
+                }
+                catch { }
+            }
+        }
+
         private static bool GetFlag(string name, bool fallback = false)
         {
             try

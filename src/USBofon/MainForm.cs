@@ -27,6 +27,7 @@ namespace USBofon
 
         private readonly CardView _cards = new CardView();
         private readonly NotifyIcon _tray = new NotifyIcon();
+        private WidgetForm _widget;
         private bool _exitRequested, _trayHintShown, _loaded;
 
         // Уведомления о подключении: что было подключено при прошлом обновлении и что подсветить.
@@ -72,6 +73,7 @@ namespace USBofon
                 if (_loaded) return;
                 _loaded = true;
                 Task.Run(() => Autostart.RepairPath());
+                if (Settings.WidgetVisible) ShowWidget(true);
                 try { _store.Load(); }
                 catch (Exception ex) { ShowError("Не удалось прочитать сохранённые имена:\r\n" + _store.FilePath, ex); }
                 RefreshDevices();
@@ -150,6 +152,7 @@ namespace USBofon
             _list.Columns.Add("Имя", 200);
             _list.Columns.Add("Состояние", 110);
             _list.Columns.Add("Устройство", 280);
+            _list.Columns.Add("Заряд", 60);
             _list.Columns.Add("Диск", 55);
             _list.Columns.Add("Состав", 240);
             _list.Columns.Add("Производитель", 130);
@@ -235,6 +238,24 @@ namespace USBofon
             notify.Click += (s, e) => Settings.NotifyConnected = !Settings.NotifyConnected;
             button.DropDownOpening += (s, e) => notify.Checked = Settings.NotifyConnected;
 
+            var widget = new ToolStripMenuItem("Виджет на рабочем столе");
+            widget.Click += (s, e) => ShowWidget(!Settings.WidgetVisible);
+            var widgetLock = new ToolStripMenuItem("Закрепить виджет")
+            {
+                ToolTipText = "Закреплённый виджет не ловит мышь — случайно ничего не нажать",
+            };
+            widgetLock.Click += (s, e) =>
+            {
+                Settings.WidgetLocked = !Settings.WidgetLocked;
+                _widget?.ApplyLock();
+            };
+            button.DropDownOpening += (s, e) =>
+            {
+                widget.Checked = Settings.WidgetVisible;
+                widgetLock.Checked = Settings.WidgetLocked;
+                widgetLock.Enabled = Settings.WidgetVisible;
+            };
+
             var namedOnly = new ToolStripMenuItem("Показывать только подписанные устройства")
             {
                 ToolTipText = "Только устройства, которым вы дали имя",
@@ -246,7 +267,7 @@ namespace USBofon
             };
             button.DropDownOpening += (s, e) => namedOnly.Checked = Settings.NamedOnly;
 
-            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, new ToolStripSeparator(), autostart, minimized });
+            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
             return button;
         }
 
@@ -415,8 +436,20 @@ namespace USBofon
 
             var menu = new ContextMenuStrip();
             var open = new ToolStripMenuItem("Открыть " + AppInfo.Name, null, (s, e) => ShowFromTray()) { Font = new Font(menu.Font, FontStyle.Bold) };
+            var widget = new ToolStripMenuItem("Виджет на рабочем столе", null, (s, e) => ShowWidget(!Settings.WidgetVisible));
+            var widgetLock = new ToolStripMenuItem("Закрепить виджет", null, (s, e) =>
+            {
+                Settings.WidgetLocked = !Settings.WidgetLocked;
+                _widget?.ApplyLock();
+            });
+            menu.Opening += (s, e) =>
+            {
+                widget.Checked = Settings.WidgetVisible;
+                widgetLock.Checked = Settings.WidgetLocked;
+                widgetLock.Enabled = Settings.WidgetVisible;
+            };
             var exit = new ToolStripMenuItem("Закрыть приложение", null, (s, e) => ConfirmExit());
-            menu.Items.AddRange(new ToolStripItem[] { open, new ToolStripSeparator(), exit });
+            menu.Items.AddRange(new ToolStripItem[] { open, widget, widgetLock, new ToolStripSeparator(), exit });
             _tray.ContextMenuStrip = menu;
             _tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowFromTray(); };
             _tray.BalloonTipClicked += (s, e) => OpenHighlighted();
@@ -494,6 +527,35 @@ namespace USBofon
             }
         }
 
+        /// <summary>Виджет на рабочем столе: список устройств с зарядом, а если таких нет — подписанные.</summary>
+        private void ShowWidget(bool show)
+        {
+            Settings.WidgetVisible = show;
+            if (!show)
+            {
+                _widget?.Close();
+                _widget = null;
+                return;
+            }
+            if (_widget == null || _widget.IsDisposed) _widget = new WidgetForm();
+            UpdateWidget();
+            _widget.Show();
+        }
+
+        private void UpdateWidget()
+        {
+            if (_widget == null || _widget.IsDisposed) return;
+            var rows = _devices
+                .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
+                .Where(x => x.Dev.Present && !x.Dev.IsHub && !x.Dev.IsInterface)
+                .Where(x => x.Saved?.Hidden != true)
+                .Where(x => x.Dev.Battery.HasValue || !string.IsNullOrEmpty(x.Saved?.Name))
+                .OrderByDescending(x => x.Dev.Battery.HasValue)
+                .ThenBy(x => x.Dev.Battery ?? 0)
+                .ToList();
+            _widget.Update(rows);
+        }
+
         public void ShowFromTray()
         {
             _startHidden = false;
@@ -548,6 +610,7 @@ namespace USBofon
                 return;
             }
             _tray.Visible = false;
+            _widget?.Close();
             base.OnFormClosing(e);
         }
 
@@ -642,6 +705,7 @@ namespace USBofon
                 var item = new ListViewItem(x.Saved?.Name ?? "") { Tag = d };
                 item.SubItems.Add(d.StatusText);
                 item.SubItems.Add(d.DisplayDescription);
+                item.SubItems.Add(d.Battery.HasValue ? d.Battery.Value + "%" : "");
                 item.SubItems.Add(string.Join(" ", d.DriveLetters));
                 item.SubItems.Add(string.Join("; ", d.Children));
                 item.SubItems.Add(d.Manufacturer ?? "");
@@ -669,6 +733,7 @@ namespace USBofon
                 _list.Items.Add(item);
             }
             _list.EndUpdate();
+            UpdateWidget();
             var firstHighlighted = _list.Items.Cast<ListViewItem>().FirstOrDefault(i => _highlight.Contains(((UsbDevice)i.Tag).InstanceId));
             firstHighlighted?.EnsureVisible();
 
@@ -824,6 +889,7 @@ namespace USBofon
                 if (d.DriveLetters.Count > 0) sb.AppendLine("Диск: " + string.Join(" ", d.DriveLetters));
                 if (!string.IsNullOrEmpty(d.Manufacturer)) sb.AppendLine("Производитель: " + d.Manufacturer);
                 if (!string.IsNullOrEmpty(d.VidPid)) sb.AppendLine("VID:PID: " + d.VidPid);
+                if (d.Battery.HasValue) sb.AppendLine("Заряд: " + d.Battery.Value + "%");
                 if (!string.IsNullOrEmpty(d.Serial)) sb.AppendLine("Серийный номер: " + d.Serial);
                 if (!string.IsNullOrEmpty(d.Location)) sb.AppendLine("Порт: " + d.Location);
                 sb.AppendLine("ID: " + d.InstanceId);
