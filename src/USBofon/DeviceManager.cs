@@ -34,19 +34,17 @@ namespace USBofon
         {
             var present = EnumeratePresentNodes();
             var letters = GetDriveLettersByDisk();
-            // Пока G HUB запущен, заряд берём у него: он и так опрашивает устройства,
-            // а наши запросы по HID++ будили бы уснувшую мышь.
+            // Устройства сами мы не опрашиваем: заряд берём у Windows (Bluetooth) и у G HUB,
+            // который и так знает его для своего окна. Спящая мышь от этого не просыпается.
             var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
-            var battery = PollBattery && ghub.Count == 0 ? Battery.Read() : new Dictionary<uint, int>();
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, battery, ghub, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, result);
             return result;
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, List<GHubBattery.Entry> ghub,
-            List<UsbDevice> result)
+            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -84,10 +82,7 @@ namespace USBofon
                     {
                         CollectChildren(dev, dev.DevInst, present, letters, 0);
                         if (!dev.IsHub)
-                            dev.Battery = Battery.ReadBluetooth(set, ref data)
-                                ?? (battery.TryGetValue(dev.DevInst, out var own) ? (int?)own : null)
-                                ?? FindBattery(dev.DevInst, battery, 0)
-                                ?? FromGHub(dev, ghub);
+                            dev.Battery = Battery.ReadBluetooth(set, ref data) ?? FromGHub(dev, ghub);
                     }
 
                     result.Add(dev);
@@ -123,18 +118,6 @@ namespace USBofon
             return guess?.Percent;
         }
 
-        /// <summary>Заряд ищем и у самого устройства, и у его HID-интерфейсов.</summary>
-        private static int? FindBattery(uint devInst, Dictionary<uint, int> battery, int depth)
-        {
-            if (depth > 4 || CM_Get_Child(out var child, devInst, 0) != CR_SUCCESS) return null;
-            do
-            {
-                if (battery.TryGetValue(child, out var percent)) return percent;
-                var deeper = FindBattery(child, battery, depth + 1);
-                if (deeper.HasValue) return deeper;
-            } while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
-            return null;
-        }
 
         public enum ChangeResult { Done, NeedsReboot }
 

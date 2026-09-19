@@ -256,17 +256,6 @@ namespace USBofon
                 widgetLock.Enabled = Settings.WidgetVisible;
             };
 
-            var wake = new ToolStripMenuItem("Спрашивать заряд у самих устройств")
-            {
-                ToolTipText = "Беспроводные устройства при этом просыпаются. Заряд от Bluetooth и G HUB "
-                            + "программа получает и без этого — там опрашивает сама Windows или G HUB.",
-            };
-            wake.Click += (s, e) =>
-            {
-                Settings.WakeForBattery = !Settings.WakeForBattery;
-                RefreshDevices();
-            };
-            button.DropDownOpening += (s, e) => wake.Checked = Settings.WakeForBattery;
 
             var namedOnly = new ToolStripMenuItem("Показывать только подписанные устройства")
             {
@@ -279,7 +268,7 @@ namespace USBofon
             };
             button.DropDownOpening += (s, e) => namedOnly.Checked = Settings.NamedOnly;
 
-            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, wake, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
+            button.DropDownItems.AddRange(new ToolStripItem[] { namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
             return button;
         }
 

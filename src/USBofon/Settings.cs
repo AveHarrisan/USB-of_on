@@ -27,12 +27,6 @@ namespace USBofon
             set => SetFlag("NotifyConnected", value);
         }
 
-        /// <summary>Спрашивать заряд у самих устройств. Беспроводные при этом просыпаются, поэтому по умолчанию выключено.</summary>
-        public static bool WakeForBattery
-        {
-            get => GetFlag("WakeForBattery");
-            set => SetFlag("WakeForBattery", value);
-        }
 
         public static bool WidgetVisible
         {
