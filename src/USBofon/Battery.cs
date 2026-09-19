@@ -42,6 +42,7 @@ namespace USBofon
 
         private static void ReadHid(Dictionary<uint, int> result)
         {
+            var interfaces = new List<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength)>();
             var guid = HidInterface;
             var set = SetupDiGetClassDevs(ref guid, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
             if (set == INVALID_HANDLE_VALUE) return;
@@ -54,7 +55,7 @@ namespace USBofon
                     var path = InterfacePath(set, ref iface, ref info);
                     if (path == null) continue;
 
-                    var percent = ReadHidBattery(path);
+                    var percent = ReadHidBattery(path, interfaces, info.DevInst);
                     if (percent.HasValue) result[info.DevInst] = percent.Value;
                 }
             }
@@ -62,6 +63,10 @@ namespace USBofon
             {
                 SetupDiDestroyDeviceInfoList(set);
             }
+
+            // Устройства Logitech заряд в стандартном отчёте не отдают — спрашиваем их по HID++.
+            try { LogitechBattery.Read(result, interfaces); }
+            catch { }
         }
 
         private static string InterfacePath(IntPtr set, ref SP_DEVICE_INTERFACE_DATA iface, ref SP_DEVINFO_DATA info)
@@ -84,7 +89,8 @@ namespace USBofon
             }
         }
 
-        private static int? ReadHidBattery(string path)
+        private static int? ReadHidBattery(string path,
+            List<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength)> interfaces, uint devInst)
         {
             // Открываем без прав чтения и записи: так устройство не отбирается у того, кто с ним работает.
             var handle = CreateFile(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
@@ -93,8 +99,13 @@ namespace USBofon
             try
             {
                 if (!HidD_GetPreparsedData(handle, out preparsed)) return null;
-                if (HidP_GetCaps(preparsed, out var caps) != HIDP_STATUS_SUCCESS || caps.NumberFeatureValueCaps == 0)
-                    return null;
+                if (HidP_GetCaps(preparsed, out var caps) != HIDP_STATUS_SUCCESS) return null;
+
+                var attributes = new HIDD_ATTRIBUTES { Size = (uint)Marshal.SizeOf(typeof(HIDD_ATTRIBUTES)) };
+                if (HidD_GetAttributes(handle, ref attributes))
+                    interfaces.Add((devInst, path, attributes.VendorID, caps.UsagePage, caps.OutputReportByteLength));
+
+                if (caps.NumberFeatureValueCaps == 0) return null;
 
                 var count = caps.NumberFeatureValueCaps;
                 var valueCaps = new HIDP_VALUE_CAPS[count];
@@ -141,6 +152,13 @@ namespace USBofon
             public Guid InterfaceClassGuid;
             public uint Flags;
             public IntPtr Reserved;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct HIDD_ATTRIBUTES
+        {
+            public uint Size;
+            public ushort VendorID, ProductID, VersionNumber;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -216,6 +234,9 @@ namespace USBofon
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("hid.dll")]
+        private static extern bool HidD_GetAttributes(IntPtr device, ref HIDD_ATTRIBUTES attributes);
 
         [DllImport("hid.dll", SetLastError = true)]
         private static extern bool HidD_GetPreparsedData(IntPtr device, out IntPtr preparsedData);
