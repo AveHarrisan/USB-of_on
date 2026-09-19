@@ -28,6 +28,9 @@ namespace USBofon
             return result;
         }
 
+        /// <summary>Прямой опрос устройств: беспроводные при этом просыпаются.</summary>
+        public static bool AllowedToWake => Settings.WakeForBattery;
+
         /// <summary>Заряд из свойства Bluetooth для одного устройства, если оно там есть.</summary>
         public static int? ReadBluetooth(IntPtr deviceInfoSet, ref SP_DEVINFO_DATA data)
         {
@@ -65,8 +68,9 @@ namespace USBofon
             }
 
             // Устройства Logitech заряд в стандартном отчёте не отдают — спрашиваем их по HID++.
-            try { LogitechBattery.Read(result, interfaces); }
-            catch { }
+            if (AllowedToWake)
+                try { LogitechBattery.Read(result, interfaces); }
+                catch { }
         }
 
         private static string InterfacePath(IntPtr set, ref SP_DEVICE_INTERFACE_DATA iface, ref SP_DEVINFO_DATA info)
@@ -105,7 +109,8 @@ namespace USBofon
                 if (HidD_GetAttributes(handle, ref attributes))
                     interfaces.Add((devInst, path, attributes.VendorID, caps.UsagePage, caps.OutputReportByteLength));
 
-                if (caps.NumberFeatureValueCaps == 0) return null;
+                // Запрос отчёта идёт к самому устройству: без разрешения не будим.
+                if (!AllowedToWake || caps.NumberFeatureValueCaps == 0) return null;
 
                 var count = caps.NumberFeatureValueCaps;
                 var valueCaps = new HIDP_VALUE_CAPS[count];
