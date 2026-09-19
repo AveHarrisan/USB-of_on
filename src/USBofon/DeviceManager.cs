@@ -32,14 +32,16 @@ namespace USBofon
             var present = EnumeratePresentNodes();
             var letters = GetDriveLettersByDisk();
             var battery = Battery.Read();
+            var ghub = GHubBattery.Read();
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, battery, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, battery, ghub, result);
             return result;
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, List<UsbDevice> result)
+            Dictionary<string, List<string>> letters, Dictionary<uint, int> battery, Dictionary<ushort, int> ghub,
+            List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -65,13 +67,6 @@ namespace USBofon
                     ParseInstanceId(dev);
                     ReadStatus(dev);
 
-                    if (dev.Present)
-                    {
-                        CollectChildren(dev, dev.DevInst, present, letters, 0);
-                        dev.Battery = Battery.ReadBluetooth(set, ref data)
-                            ?? (battery.TryGetValue(dev.DevInst, out var own) ? (int?)own : null)
-                            ?? FindBattery(dev.DevInst, battery, 0);
-                    }
 
                     dev.IsHub = dev.InstanceId.IndexOf("ROOT_HUB", StringComparison.OrdinalIgnoreCase) >= 0
                         || string.Equals(dev.Service, "usbhub", StringComparison.OrdinalIgnoreCase)
@@ -80,6 +75,16 @@ namespace USBofon
                            && (dev.Description.IndexOf("hub", StringComparison.OrdinalIgnoreCase) >= 0
                                || dev.Description.IndexOf("концентратор", StringComparison.OrdinalIgnoreCase) >= 0);
 
+                    if (dev.Present)
+                    {
+                        CollectChildren(dev, dev.DevInst, present, letters, 0);
+                        if (!dev.IsHub)
+                            dev.Battery = Battery.ReadBluetooth(set, ref data)
+                                ?? (battery.TryGetValue(dev.DevInst, out var own) ? (int?)own : null)
+                                ?? FindBattery(dev.DevInst, battery, 0)
+                                ?? FromGHub(dev, ghub);
+                    }
+
                     result.Add(dev);
                 }
             }
@@ -87,6 +92,16 @@ namespace USBofon
             {
                 SetupDiDestroyDeviceInfoList(set);
             }
+        }
+
+        /// <summary>Последняя надежда: заряд, который знает G HUB (гарнитуры Logitech).</summary>
+        private static int? FromGHub(UsbDevice dev, Dictionary<ushort, int> ghub)
+        {
+            if (ghub.Count == 0 || dev.Pid == null) return null;
+            return ushort.TryParse(dev.Pid, System.Globalization.NumberStyles.HexNumber, null, out var pid)
+                   && ghub.TryGetValue(pid, out var percent)
+                ? (int?)percent
+                : null;
         }
 
         /// <summary>Заряд ищем и у самого устройства, и у его HID-интерфейсов.</summary>
