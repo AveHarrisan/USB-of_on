@@ -218,6 +218,11 @@ namespace USBofon
         private ToolStripDropDownButton BuildSettingsMenu()
         {
             var button = new ToolStripDropDownButton("Настройки") { Alignment = ToolStripItemAlignment.Right };
+            var report = new ToolStripMenuItem("Собрать отчёт для разбора…", null,
+                (s, e) => Report.Save(this, _devices, _store))
+            {
+                ToolTipText = "Текстовый файл: что нашла программа и откуда взяла заряд",
+            };
             var advanced = new ToolStripMenuItem("Все настройки…", null, (s, e) => ShowSettings())
             {
                 Font = new Font(button.Font, FontStyle.Bold),
@@ -282,7 +287,7 @@ namespace USBofon
             };
             button.DropDownOpening += (s, e) => namedOnly.Checked = Settings.NamedOnly;
 
-            button.DropDownItems.AddRange(new ToolStripItem[] { advanced, new ToolStripSeparator(), namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
+            button.DropDownItems.AddRange(new ToolStripItem[] { advanced, report, new ToolStripSeparator(), namedOnly, notify, new ToolStripSeparator(), widget, widgetLock, new ToolStripSeparator(), autostart, minimized });
             return button;
         }
 

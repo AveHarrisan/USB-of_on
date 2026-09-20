@@ -85,6 +85,11 @@ namespace USBofon
             root.Controls.Add(Slider("Обновлять заряд раз в", 1, 30, 1,
                 () => Settings.BatteryMinutes, v => Settings.BatteryMinutes = v, Minutes));
 
+            root.Controls.Add(Head("Если что-то показывается неверно"));
+            root.Controls.Add(Note("Соберите отчёт: в нём видно, какие устройства нашла программа, "
+                                   + "какой заряд сообщили Windows, G HUB и Synapse и откуда взято каждое значение. "
+                                   + "Файл текстовый, его можно прочитать перед отправкой."));
+
             var close = new Button { Text = "Закрыть", AutoSize = true, DialogResult = DialogResult.OK, Margin = new Padding(0, 16, 0, 0) };
             var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Dock = DockStyle.Fill };
             buttons.Controls.Add(close);
