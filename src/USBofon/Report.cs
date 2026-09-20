@@ -43,6 +43,28 @@ namespace USBofon
                 Line($"   «{entry.Name}» = {entry.Percent}%");
             Line();
 
+            Line("== Сводка ==");
+            var present = devices.Where(d => d.Present).ToList();
+            Line("Всего записей: " + devices.Count + ", подключено: " + present.Count);
+            Line("   из них хабов: " + present.Count(d => d.IsHub)
+                 + ", служебных интерфейсов: " + present.Count(d => d.IsInterface)
+                 + ", самостоятельных устройств: " + present.Count(d => !d.IsHub && !d.IsInterface));
+            Line("   показывается в простом виде: " + present.Count(d => !d.IsHub && !d.IsInterface
+                                                                        && store.Find(d.InstanceId)?.Hidden != true));
+            Line("   с зарядом: " + present.Count(d => d.Battery.HasValue));
+
+            // Несколько записей об одном физическом устройстве — частая причина «откуда столько приёмников».
+            Line();
+            Line("Записи с одинаковым VID:PID (это одно устройство, показанное частями):");
+            foreach (var group in present.Where(d => !string.IsNullOrEmpty(d.VidPid))
+                         .GroupBy(d => d.VidPid).Where(g => g.Count() > 1).OrderBy(g => g.Key))
+            {
+                Line($"   {group.Key} — записей {group.Count()}:");
+                foreach (var dev in group)
+                    Line($"      {(dev.IsInterface ? "интерфейс" : dev.IsHub ? "хаб" : "устройство")}: {dev.Description} | {dev.InstanceId}");
+            }
+
+            Line();
             Line("== Устройства ==");
             foreach (var dev in devices.OrderByDescending(d => d.Present).ThenBy(d => d.InstanceId))
             {
@@ -56,7 +78,11 @@ namespace USBofon
                      + $"состояние={dev.StatusText}, тип={DevicePresentation.KindText(DevicePresentation.Kind(dev))}");
                 Line("   заряд: " + (dev.Battery.HasValue ? dev.Battery + "%" : "нет")
                      + (string.IsNullOrEmpty(dev.BatterySource) ? "" : "  ← " + dev.BatterySource));
+                Line("   родитель: " + (Parent(dev) ?? "нет"));
                 if (dev.Children.Count > 0) Line("   внутри: " + string.Join("; ", dev.Children));
+                if (dev.ChildInstanceIds.Count > 0)
+                    foreach (var child in dev.ChildInstanceIds)
+                        Line("      дочерний id: " + child);
                 if (dev.DriveLetters.Count > 0) Line("   диски: " + string.Join(" ", dev.DriveLetters));
                 Line();
             }
@@ -89,6 +115,17 @@ namespace USBofon
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        /// <summary>Идентификатор родителя: по нему видно, что «лишние» записи — части одного устройства.</summary>
+        private static string Parent(UsbDevice dev)
+        {
+            if (NativeMethods.CM_Get_Parent(out var parent, dev.DevInst, 0) != NativeMethods.CR_SUCCESS) return null;
+            var buffer = new char[512];
+            if (NativeMethods.CM_Get_Device_ID(parent, buffer, buffer.Length, 0) != NativeMethods.CR_SUCCESS) return null;
+            var text = new string(buffer);
+            var zero = text.IndexOf('\0');
+            return zero >= 0 ? text.Substring(0, zero) : text.Trim();
         }
 
         private static bool IsAdmin()
