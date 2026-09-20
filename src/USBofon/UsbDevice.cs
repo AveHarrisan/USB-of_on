@@ -19,6 +19,8 @@ namespace USBofon
         public string Bus = "USB";
         /// <summary>Заряд в процентах, если устройство его сообщает.</summary>
         public int? Battery;
+        /// <summary>Откуда взялся заряд — для отчёта.</summary>
+        public string BatterySource;
 
         public bool Present;
         public bool Disabled;

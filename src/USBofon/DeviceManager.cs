@@ -39,16 +39,18 @@ namespace USBofon
             // который и так знает его для своего окна. Спящая мышь от этого не просыпается.
             var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
             var razer = PollBattery ? RazerBattery.Read() : new List<(string Name, int Percent)>();
+            // Одно значение от G HUB — одному устройству: иначе двум мышам достался бы один и тот же заряд.
+            var usedGHub = new HashSet<ushort>();
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, razer, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, usedGHub, razer, result);
 
             AddDevicesWithBattery(present, result);
             return result;
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub,
+            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub, HashSet<ushort> usedGHub,
             List<(string Name, int Percent)> razer, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
@@ -87,10 +89,10 @@ namespace USBofon
                     {
                         CollectChildren(dev, dev.DevInst, present, letters, 0);
                         if (!dev.IsHub)
-                            dev.Battery = Battery.ReadBluetooth(set, ref data)
-                                ?? ChildBattery(dev.DevInst, present, 0)
-                                ?? FromGHub(dev, ghub)
-                                ?? RazerBattery.For(dev, razer);
+                            dev.Battery = Mark(dev, "Windows", Battery.ReadBluetooth(set, ref data))
+                                ?? Mark(dev, "Windows, у части устройства", ChildBattery(dev.DevInst, present, 0))
+                                ?? FromGHub(dev, ghub, usedGHub)
+                                ?? Mark(dev, "журнал Razer Synapse", RazerBattery.For(dev, razer));
                     }
 
                     result.Add(dev);
@@ -100,6 +102,13 @@ namespace USBofon
             {
                 SetupDiDestroyDeviceInfoList(set);
             }
+        }
+
+        /// <summary>Запоминает, откуда взялся заряд: нужно для отчёта.</summary>
+        private static int? Mark(UsbDevice dev, string source, int? percent)
+        {
+            if (percent.HasValue) dev.BatterySource = source;
+            return percent;
         }
 
         /// <summary>Заряд, который Windows знает у частей устройства: например, у Bluetooth-клавиатуры внутри составного.</summary>
@@ -172,24 +181,35 @@ namespace USBofon
         /// Заряд, который знает G HUB. Сначала ищем устройство по коду модели, а если не совпало —
         /// по типу: мышь за приёмником Logitech видна системе как приёмник, а G HUB знает её как мышь.
         /// </summary>
-        private static int? FromGHub(UsbDevice dev, List<GHubBattery.Entry> ghub)
+        private static int? FromGHub(UsbDevice dev, List<GHubBattery.Entry> ghub, HashSet<ushort> used)
         {
             if (ghub.Count == 0 || !string.Equals(dev.Vid, "046D", StringComparison.OrdinalIgnoreCase)) return null;
 
+            // Точное совпадение по коду модели: одно устройство может числиться в списке несколько раз.
             if (ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid))
             {
                 var exact = ghub.FirstOrDefault(e => e.Pid == pid);
-                if (exact != null) return exact.Percent;
+                if (exact != null)
+                {
+                    used.Add(exact.Pid);
+                    dev.BatterySource = "G HUB, по коду модели";
+                    return exact.Percent;
+                }
             }
 
+            // Догадка по типу: мышь за приёмником системе видна как приёмник. Каждое значение — только одному устройству.
+            if (dev.IsInterface || dev.IsHub) return null;
             var kind = DevicePresentation.Kind(dev);
             var wanted = kind == DeviceKind.Keyboard ? new[] { "MOUSE", "KEYBOARD" }
                 : kind == DeviceKind.Audio ? new[] { "HEADSET" }
                 : null;
             if (wanted == null) return null;
 
-            var guess = ghub.FirstOrDefault(e => Array.IndexOf(wanted, e.Kind) >= 0);
-            return guess?.Percent;
+            var guess = ghub.FirstOrDefault(e => !used.Contains(e.Pid) && Array.IndexOf(wanted, e.Kind) >= 0);
+            if (guess == null) return null;
+            used.Add(guess.Pid);
+            dev.BatterySource = "G HUB, по типу устройства (" + guess.Name + ")";
+            return guess.Percent;
         }
 
 
