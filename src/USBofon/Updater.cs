@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -38,55 +39,86 @@ namespace USBofon
             Http.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.Name + "/" + AppInfo.VersionText);
         }
 
-        [DataContract]
-        private sealed class GhRelease
-        {
-            [DataMember(Name = "tag_name")] public string TagName;
-            [DataMember(Name = "body")] public string Body;
-            [DataMember(Name = "html_url")] public string HtmlUrl;
-            [DataMember(Name = "draft")] public bool Draft;
-            [DataMember(Name = "prerelease")] public bool Prerelease;
-            [DataMember(Name = "assets")] public GhAsset[] Assets;
-        }
 
-        [DataContract]
-        private sealed class GhAsset
-        {
-            [DataMember(Name = "name")] public string Name;
-            [DataMember(Name = "browser_download_url")] public string Url;
-            [DataMember(Name = "size")] public long Size;
-        }
 
-        /// <summary>Свежий выпуск, если он новее установленного; иначе null.</summary>
+        /// <summary>
+        /// Свежий выпуск, если он новее установленного; иначе null.
+        /// Версию читаем из файла в репозитории, а не через API GitHub: у API есть ограничение
+        /// на число обращений с одного адреса, из-за которого проверка падала с ошибкой 403.
+        /// </summary>
         public static async Task<ReleaseInfo> CheckAsync()
         {
-            var request = new HttpRequestMessage(HttpMethod.Get,
-                "https://api.github.com/repos/" + AppInfo.Repository + "/releases/latest");
-            request.Headers.Accept.ParseAdd("application/vnd.github+json");
-            using (var response = await Http.SendAsync(request).ConfigureAwait(false))
+            var version = await CheckByFileAsync().ConfigureAwait(false);
+            if (version == null || Normalize(version) <= Normalize(AppInfo.Version)) return null;
+
+            return new ReleaseInfo
             {
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                    throw new InvalidOperationException("Сведения о версиях на GitHub недоступны.");
-                response.EnsureSuccessStatusCode();
-                GhRelease release;
-                using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                    release = (GhRelease)new DataContractJsonSerializer(typeof(GhRelease)).ReadObject(stream);
+                Version = version,
+                Notes = await NotesAsync(version).ConfigureAwait(false),
+                PageUrl = "https://github.com/" + AppInfo.Repository + "/releases/latest",
+                SetupUrl = "https://github.com/" + AppInfo.Repository + "/releases/latest/download/" + AppInfo.SetupAsset,
+                SetupSize = 0,
+            };
+        }
 
-                var asset = release.Assets?.FirstOrDefault(a => string.Equals(a.Name, AppInfo.SetupAsset, StringComparison.OrdinalIgnoreCase));
-                if (release.Draft || release.Prerelease || asset == null) return null;
-                if (!Version.TryParse((release.TagName ?? "").TrimStart('v', 'V'), out var version)) return null;
-                if (Normalize(version) <= Normalize(AppInfo.Version)) return null;
+        private static async Task<Version> CheckByFileAsync()
+        {
+            var text = await GetTextAsync(Raw + "docs/badges/version.json").ConfigureAwait(false);
+            var match = Regex.Match(text ?? "", @"""message""\s*:\s*""v?([0-9]+(?:\.[0-9]+){1,3})""");
+            return match.Success && Version.TryParse(match.Groups[1].Value, out var version) ? version : null;
+        }
 
-                return new ReleaseInfo
+        /// <summary>Что нового — берём раздел этой версии из CHANGELOG.md.</summary>
+        private static async Task<string> NotesAsync(Version version)
+        {
+            var text = await GetTextAsync(Raw + "CHANGELOG.md").ConfigureAwait(false);
+            if (string.IsNullOrEmpty(text)) return null;
+
+            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var notes = new System.Text.StringBuilder();
+            var inside = false;
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("## "))
                 {
-                    Version = version,
-                    Notes = release.Body,
-                    PageUrl = release.HtmlUrl,
-                    SetupUrl = asset.Url,
-                    SetupSize = asset.Size,
-                };
+                    if (inside) break;
+                    inside = line.Substring(3).Trim() == version.ToString(3);
+                    continue;
+                }
+                if (inside && line.Trim().Length > 0) notes.AppendLine(line.Trim());
+            }
+            return notes.Length > 0 ? notes.ToString().Trim() : null;
+        }
+
+        private static async Task<string> GetTextAsync(string url)
+        {
+            try
+            {
+                using (var response = await Http.GetAsync(url).ConfigureAwait(false))
+                {
+                    if (!response.IsSuccessStatusCode)
+                        throw new InvalidOperationException(Explain(response.StatusCode));
+                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InvalidOperationException("Нет связи с GitHub. " + ex.Message);
             }
         }
+
+        private static string Explain(HttpStatusCode code)
+        {
+            switch ((int)code)
+            {
+                case 403:
+                case 429: return "GitHub временно ограничил число обращений — попробуйте позже.";
+                case 404: return "Файл с версией не найден в репозитории.";
+                default: return "GitHub ответил: " + (int)code + ".";
+            }
+        }
+
+        private const string Raw = "https://raw.githubusercontent.com/AveHarrisan/USB-of_on/main/";
 
         public static async Task<string> DownloadAsync(ReleaseInfo release, IProgress<int> progress, CancellationToken ct)
         {

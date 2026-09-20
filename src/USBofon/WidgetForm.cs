@@ -110,13 +110,13 @@ namespace USBofon
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                    Paint(g, top);
+                    PaintWidget(g, top);
                 }
                 Push(bitmap);
             }
         }
 
-        private void Paint(Graphics g, int top)
+        private void PaintWidget(Graphics g, int top)
         {
             var opacity = Settings.WidgetOpacity / 100.0;
             var backAlpha = (int)Math.Round(255 * (Settings.WidgetBackground / 100.0) * opacity);
