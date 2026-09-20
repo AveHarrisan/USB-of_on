@@ -191,7 +191,7 @@ namespace USBofon
                                                    && !d.IsPart && !d.IsInterface && !d.IsHub))
             {
                 if (!ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid)) continue;
-                var exact = ghub.FirstOrDefault(e => e.Pid == pid);
+                var exact = ghub.FirstOrDefault(e => e.Pid == pid && e.Percent.HasValue);
                 if (exact == null) continue;
                 dev.Battery = exact.Percent;
                 dev.BatterySource = "G HUB, по коду модели";
@@ -207,7 +207,8 @@ namespace USBofon
                     : null;
                 if (wanted == null) continue;
 
-                var free = ghub.Where(e => !used.Contains(e.Pid) && Array.IndexOf(wanted, e.Kind) >= 0).ToList();
+                var free = ghub.Where(e => e.Percent.HasValue && !used.Contains(e.Pid)
+                                           && Array.IndexOf(wanted, e.Kind) >= 0).ToList();
                 if (free.Count == 0) continue;
 
                 // Если название совпадает — берём его, иначе догадываемся только при единственном кандидате.

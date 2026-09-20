@@ -23,12 +23,18 @@ namespace USBofon
             public ushort Pid;
             public string Kind;      // MOUSE, KEYBOARD, HEADSET и т. п.
             public string Name;
-            public int Percent;
+            /// <summary>Заряд в процентах; null — G HUB устройство знает, но заряд не сообщает.</summary>
+            public int? Percent;
+            /// <summary>Что ответил G HUB на запрос заряда — для отчёта.</summary>
+            public string Answer;
         }
 
         private static TimeSpan CacheTime => TimeSpan.FromMinutes(Settings.BatteryMinutes);
         private static List<Entry> _cache = new List<Entry>();
         private static DateTime _read = DateTime.MinValue;
+
+        /// <summary>Последний ответ G HUB со списком устройств — целиком, для отчёта.</summary>
+        public static string LastDevicesJson { get; private set; }
 
         /// <summary>Что знает G HUB о заряде подключённых к нему устройств.</summary>
         public static List<Entry> Read()
@@ -53,6 +59,7 @@ namespace USBofon
             if (!PortOpen()) return result;      // G HUB не запущен — не ждём соединения впустую
 
             var devices = Ask("/devices/list");
+            LastDevicesJson = devices;
             if (devices == null) return result;
 
             foreach (Match match in Regex.Matches(devices, @"""id"":\s*""(dev[0-9a-f]+)"",\s*""pid"":\s*(\d+)"))
@@ -61,10 +68,18 @@ namespace USBofon
                 if (!ushort.TryParse(match.Groups[2].Value, out var pid)) continue;
 
                 var state = Ask("/battery/" + id + "/state");
-                if (state == null) continue;
-                var percent = Regex.Match(state, @"""percentage"":\s*([0-9]+)");
-                if (!percent.Success || !int.TryParse(percent.Groups[1].Value, out var value) || value < 0 || value > 100)
-                    continue;
+                var percent = state == null ? Match.Empty : Regex.Match(state, @"""percentage"":\s*([0-9]+)");
+                int? value = percent.Success && int.TryParse(percent.Groups[1].Value, out var parsed)
+                             && parsed >= 0 && parsed <= 100
+                    ? (int?)parsed
+                    : null;
+
+                // Короткий ответ G HUB оставляем для отчёта: по нему видно, знает он заряд или нет.
+                var answer = state == null ? "нет ответа"
+                    : value.HasValue ? "заряд получен"
+                    : Regex.Match(state, @"""code"":\s*""([A-Z_]+)""") is Match code && code.Success
+                        ? code.Groups[1].Value
+                        : "без поля percentage";
 
                 // Тип и название берём из описания устройства: по ним сопоставим приёмник с его мышью.
                 var tail = devices.Substring(match.Index, Math.Min(3000, devices.Length - match.Index));
@@ -76,6 +91,7 @@ namespace USBofon
                     Kind = kind.Success ? kind.Groups[1].Value : "",
                     Name = name.Success ? name.Groups[1].Value : "",
                     Percent = value,
+                    Answer = answer,
                 });
             }
             return result;

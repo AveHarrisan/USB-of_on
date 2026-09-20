@@ -34,9 +34,10 @@ namespace USBofon
                  + ", обновление раз в " + Settings.BatteryMinutes + " мин");
 
             var ghub = Settings.UseGHub ? GHubBattery.Read() : new List<GHubBattery.Entry>();
-            Line("G HUB сообщил устройств: " + ghub.Count);
+            Line("G HUB знает устройств: " + ghub.Count + ", из них с зарядом: " + ghub.Count(e => e.Percent.HasValue));
             foreach (var entry in ghub)
-                Line($"   pid={entry.Pid} (0x{entry.Pid:X4}) тип={entry.Kind} «{entry.Name}» = {entry.Percent}%");
+                Line($"   pid={entry.Pid} (0x{entry.Pid:X4}) тип={entry.Kind} «{entry.Name}» = "
+                     + (entry.Percent.HasValue ? entry.Percent + "%" : "заряд не сообщён") + "  [" + entry.Answer + "]");
 
             var razer = Settings.UseSynapse ? RazerBattery.Read() : new List<(string Name, int Percent)>();
             Line("Журнал Synapse дал записей: " + razer.Count);
@@ -67,6 +68,13 @@ namespace USBofon
             }
 
             Line();
+            Line("== Настройки ==");
+            Line($"   тема приложения={Settings.AppTheme}, тема виджета={Settings.WidgetTheme}, "
+                 + $"виджет={Settings.WidgetVisible}, закреплён={Settings.WidgetLocked}, содержимое={Settings.WidgetContent}");
+            Line($"   только подписанные={Settings.NamedOnly}, уведомления={Settings.NotifyConnected}, "
+                 + $"автозапуск={Autostart.Enabled}, в трее={Settings.StartMinimized}");
+            Line();
+
             Line("== Устройства ==");
             foreach (var dev in devices.OrderByDescending(d => d.Present).ThenBy(d => d.InstanceId))
             {
@@ -88,6 +96,23 @@ namespace USBofon
                 if (dev.DriveLetters.Count > 0) Line("   диски: " + string.Join(" ", dev.DriveLetters));
                 Line();
             }
+
+            Line("== HID-коллекции устройств ==");
+            foreach (var item in Battery.HidInventory()) Line("   " + item);
+            Line();
+
+            Line("== Полный ответ G HUB со списком устройств ==");
+            var raw = GHubBattery.LastDevicesJson;
+            if (string.IsNullOrEmpty(raw)) Line("   G HUB не ответил или выключен в настройках");
+            else Line(raw.Length > 40000 ? raw.Substring(0, 40000) + "\r\n   …обрезано" : raw);
+            Line();
+
+            Line("== Свойства Windows с числом 0–100 (возможные места, где система хранит заряд) ==");
+            var scanned = Battery.ScanByteProperties();
+            if (scanned.Count == 0) Line("   ничего не найдено");
+            foreach (var item in scanned.Take(80)) Line("   " + item);
+            if (scanned.Count > 80) Line("   … и ещё " + (scanned.Count - 80));
+            Line();
 
             Line("В отчёте есть названия и серийные номера ваших устройств. Личных данных, паролей и содержимого дисков нет.");
             return text.ToString();
