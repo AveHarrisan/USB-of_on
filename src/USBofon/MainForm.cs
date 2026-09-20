@@ -571,7 +571,7 @@ namespace USBofon
         private void NotifyConnected()
         {
             var present = new HashSet<string>(
-                _devices.Where(d => d.Present && !d.IsHub && !d.IsInterface).Select(d => d.InstanceId),
+                _devices.Where(d => d.Present && !d.IsHub && !d.IsInterface && !d.IsPart).Select(d => d.InstanceId),
                 StringComparer.OrdinalIgnoreCase);
             var known = _knownPresent;
             _knownPresent = present;
@@ -655,7 +655,7 @@ namespace USBofon
             var content = Settings.WidgetContent;
             var rows = _devices
                 .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
-                .Where(x => x.Dev.Present && !x.Dev.IsHub && !x.Dev.IsInterface)
+                .Where(x => x.Dev.Present && !x.Dev.IsHub && !x.Dev.IsInterface && !x.Dev.IsPart)
                 .Where(x => x.Saved?.Hidden != true)
                 .Where(x => content == 2
                             || (content == 1 && (x.Dev.Battery.HasValue || !string.IsNullOrEmpty(x.Saved?.Name)))
@@ -799,7 +799,7 @@ namespace USBofon
                 var cards = _devices
                     .Select(d => (Dev: d, Saved: _store.Find(d.InstanceId)))
                     .Where(x => _showHidden.Checked || x.Saved == null || !x.Saved.Hidden)
-                    .Where(x => !x.Dev.IsHub && !x.Dev.IsInterface)
+                    .Where(x => !x.Dev.IsHub && !x.Dev.IsInterface && !x.Dev.IsPart)
                     .Where(x => !Settings.NamedOnly || !string.IsNullOrEmpty(x.Saved?.Name))
                     .Where(x => x.Dev.Present || !string.IsNullOrEmpty(x.Saved?.Name))
                     .Where(x => query.Length == 0 || Matches(x.Dev, x.Saved, query))
@@ -850,7 +850,7 @@ namespace USBofon
             var firstHighlighted = _list.Items.Cast<ListViewItem>().FirstOrDefault(i => _highlight.Contains(((UsbDevice)i.Tag).InstanceId));
             firstHighlighted?.EnsureVisible();
 
-            var present = _devices.Count(d => d.Present && !d.IsHub && !d.IsInterface);
+            var present = _devices.Count(d => d.Present && !d.IsHub && !d.IsInterface && !d.IsPart);
             var disabled = _devices.Count(d => d.Present && d.Disabled);
             _status.Text = $"Показано: {visible.Count}   Подключено устройств: {present}   Выключено: {disabled}   Данные: {_store.FilePath}";
             UpdateButtons();

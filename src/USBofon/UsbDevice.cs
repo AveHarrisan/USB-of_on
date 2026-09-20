@@ -28,6 +28,10 @@ namespace USBofon
 
         public bool IsHub;
         public bool IsInterface;
+        /// <summary>Запись — часть другого устройства из списка (подсветка, слот, интерфейс).</summary>
+        public bool IsPart;
+        /// <summary>Идентификатор родительского узла.</summary>
+        public string ParentId;
         public bool IsInput;
 
         public readonly List<string> Children = new List<string>();

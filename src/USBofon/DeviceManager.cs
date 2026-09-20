@@ -39,19 +39,19 @@ namespace USBofon
             // который и так знает его для своего окна. Спящая мышь от этого не просыпается.
             var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
             var razer = PollBattery ? RazerBattery.Read() : new List<(string Name, int Percent)>();
-            // Одно значение от G HUB — одному устройству: иначе двум мышам достался бы один и тот же заряд.
-            var usedGHub = new HashSet<ushort>();
+
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, ghub, usedGHub, razer, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, razer, result);
 
             AddDevicesWithBattery(present, result);
+            MarkParts(result);
+            AssignGHub(result, ghub);
             return result;
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, List<GHubBattery.Entry> ghub, HashSet<ushort> usedGHub,
-            List<(string Name, int Percent)> razer, List<UsbDevice> result)
+            Dictionary<string, List<string>> letters, List<(string Name, int Percent)> razer, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -91,8 +91,8 @@ namespace USBofon
                         if (!dev.IsHub)
                             dev.Battery = Mark(dev, "Windows", Battery.ReadBluetooth(set, ref data))
                                 ?? Mark(dev, "Windows, у части устройства", ChildBattery(dev.DevInst, present, 0))
-                                ?? FromGHub(dev, ghub, usedGHub)
                                 ?? Mark(dev, "журнал Razer Synapse", RazerBattery.For(dev, razer));
+                        dev.ParentId = ParentId(dev.DevInst);
                     }
 
                     result.Add(dev);
@@ -178,39 +178,92 @@ namespace USBofon
         }
 
         /// <summary>
-        /// Заряд, который знает G HUB. Сначала ищем устройство по коду модели, а если не совпало —
-        /// по типу: мышь за приёмником Logitech видна системе как приёмник, а G HUB знает её как мышь.
+        /// Раздаёт заряд от G HUB в два прохода: сначала точные совпадения по коду модели,
+        /// потом догадки по типу — только тем значениям, которые никому не достались.
+        /// Без этого заряд клавиатуры мог оказаться на чужом приёмнике.
         /// </summary>
-        private static int? FromGHub(UsbDevice dev, List<GHubBattery.Entry> ghub, HashSet<ushort> used)
+        private static void AssignGHub(List<UsbDevice> devices, List<GHubBattery.Entry> ghub)
         {
-            if (ghub.Count == 0 || !string.Equals(dev.Vid, "046D", StringComparison.OrdinalIgnoreCase)) return null;
+            if (ghub.Count == 0) return;
+            var used = new HashSet<ushort>();
 
-            // Точное совпадение по коду модели: одно устройство может числиться в списке несколько раз.
-            if (ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid))
+            foreach (var dev in devices.Where(d => d.Present && !d.Battery.HasValue && IsLogitech(d)))
             {
+                if (!ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid)) continue;
                 var exact = ghub.FirstOrDefault(e => e.Pid == pid);
-                if (exact != null)
-                {
-                    used.Add(exact.Pid);
-                    dev.BatterySource = "G HUB, по коду модели";
-                    return exact.Percent;
-                }
+                if (exact == null) continue;
+                dev.Battery = exact.Percent;
+                dev.BatterySource = "G HUB, по коду модели";
+                used.Add(exact.Pid);
             }
 
-            // Догадка по типу: мышь за приёмником системе видна как приёмник. Каждое значение — только одному устройству.
-            if (dev.IsInterface || dev.IsHub) return null;
-            var kind = DevicePresentation.Kind(dev);
-            var wanted = kind == DeviceKind.Keyboard ? new[] { "MOUSE", "KEYBOARD" }
-                : kind == DeviceKind.Audio ? new[] { "HEADSET" }
-                : null;
-            if (wanted == null) return null;
+            foreach (var dev in devices.Where(d => d.Present && !d.Battery.HasValue && IsLogitech(d)
+                                                   && !d.IsPart && !d.IsInterface && !d.IsHub))
+            {
+                var kind = DevicePresentation.Kind(dev);
+                var wanted = kind == DeviceKind.Keyboard ? new[] { "MOUSE", "KEYBOARD" }
+                    : kind == DeviceKind.Audio ? new[] { "HEADSET" }
+                    : null;
+                if (wanted == null) continue;
 
-            var guess = ghub.FirstOrDefault(e => !used.Contains(e.Pid) && Array.IndexOf(wanted, e.Kind) >= 0);
-            if (guess == null) return null;
-            used.Add(guess.Pid);
-            dev.BatterySource = "G HUB, по типу устройства (" + guess.Name + ")";
-            return guess.Percent;
+                var free = ghub.Where(e => !used.Contains(e.Pid) && Array.IndexOf(wanted, e.Kind) >= 0).ToList();
+                if (free.Count == 0) continue;
+
+                // Если название совпадает — берём его, иначе догадываемся только при единственном кандидате.
+                var title = (DevicePresentation.FriendlyName(dev) + " " + dev.Description).ToLowerInvariant();
+                var match = free.FirstOrDefault(e => !string.IsNullOrEmpty(e.Name) && title.Contains(e.Name.ToLowerInvariant()))
+                            ?? (free.Count == 1 ? free[0] : null);
+                if (match == null) continue;
+
+                dev.Battery = match.Percent;
+                dev.BatterySource = "G HUB, по типу устройства (" + match.Name + ")";
+                used.Add(match.Pid);
+            }
         }
+
+        private static bool IsLogitech(UsbDevice dev) =>
+            string.Equals(dev.Vid, "046D", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Помечает записи, которые на деле — части другого устройства из списка: подсветка, слоты,
+        /// интерфейсы. Иначе одна клавиатура выглядит как пять устройств с одинаковым зарядом.
+        /// </summary>
+        private static void MarkParts(List<UsbDevice> devices)
+        {
+            var byId = new Dictionary<string, UsbDevice>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dev in devices)
+                if (!string.IsNullOrEmpty(dev.InstanceId)) byId[dev.InstanceId] = dev;
+
+            foreach (var dev in devices)
+            {
+                if (dev.IsHub) continue;
+                var node = dev.DevInst;
+                for (var depth = 0; depth < 6; depth++)
+                {
+                    var parentId = ParentId(node);
+                    if (string.IsNullOrEmpty(parentId)) break;
+                    // Хаб — не устройство-владелец: внутри него сидят самостоятельные устройства.
+                    if (byId.TryGetValue(parentId, out var owner) && owner != dev && !owner.IsHub)
+                    {
+                        dev.IsPart = true;
+                        break;
+                    }
+                    if (CM_Get_Parent(out var parent, node, 0) != CR_SUCCESS) break;
+                    node = parent;
+                }
+            }
+        }
+
+        private static string ParentId(uint devInst)
+        {
+            if (devInst == 0 || CM_Get_Parent(out var parent, devInst, 0) != CR_SUCCESS) return null;
+            var buffer = new char[512];
+            if (CM_Get_Device_ID(parent, buffer, buffer.Length, 0) != CR_SUCCESS) return null;
+            var text = new string(buffer);
+            var zero = text.IndexOf('\0');
+            return zero >= 0 ? text.Substring(0, zero) : text.Trim();
+        }
+
 
 
         public enum ChangeResult { Done, NeedsReboot }

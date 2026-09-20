@@ -48,8 +48,9 @@ namespace USBofon
             Line("Всего записей: " + devices.Count + ", подключено: " + present.Count);
             Line("   из них хабов: " + present.Count(d => d.IsHub)
                  + ", служебных интерфейсов: " + present.Count(d => d.IsInterface)
-                 + ", самостоятельных устройств: " + present.Count(d => !d.IsHub && !d.IsInterface));
-            Line("   показывается в простом виде: " + present.Count(d => !d.IsHub && !d.IsInterface
+                 + ", частей других устройств (подсветка, слоты): " + present.Count(d => d.IsPart && !d.IsInterface)
+                 + ", самостоятельных устройств: " + present.Count(d => !d.IsHub && !d.IsInterface && !d.IsPart));
+            Line("   показывается в простом виде: " + present.Count(d => !d.IsHub && !d.IsInterface && !d.IsPart
                                                                         && store.Find(d.InstanceId)?.Hidden != true));
             Line("   с зарядом: " + present.Count(d => d.Battery.HasValue));
 
@@ -74,11 +75,11 @@ namespace USBofon
                 Line("   id: " + dev.InstanceId);
                 Line($"   шина: {dev.Bus}, класс: {dev.ClassName}, служба: {dev.Service}");
                 Line($"   VID:PID: {dev.VidPid}, серийный: {dev.Serial}");
-                Line($"   признаки: хаб={dev.IsHub}, интерфейс={dev.IsInterface}, ввод={dev.IsInput}, "
+                Line($"   признаки: хаб={dev.IsHub}, интерфейс={dev.IsInterface}, часть другого={dev.IsPart}, ввод={dev.IsInput}, "
                      + $"состояние={dev.StatusText}, тип={DevicePresentation.KindText(DevicePresentation.Kind(dev))}");
                 Line("   заряд: " + (dev.Battery.HasValue ? dev.Battery + "%" : "нет")
                      + (string.IsNullOrEmpty(dev.BatterySource) ? "" : "  ← " + dev.BatterySource));
-                Line("   родитель: " + (Parent(dev) ?? "нет"));
+                Line("   родитель: " + (dev.ParentId ?? Parent(dev) ?? "нет"));
                 if (dev.Children.Count > 0) Line("   внутри: " + string.Join("; ", dev.Children));
                 if (dev.ChildInstanceIds.Count > 0)
                     foreach (var child in dev.ChildInstanceIds)
