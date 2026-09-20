@@ -10,7 +10,7 @@ namespace USBofon
     /// <summary>Простой вид: устройства карточками, с переключателем и меню.</summary>
     internal sealed class CardView : FlowLayoutPanel
     {
-        public static readonly Color Background = Color.FromArgb(243, 244, 246);
+        public static Color Background => Theme.Canvas;
 
         public event Action<UsbDevice, bool> ToggleRequested;
         public event Action<UsbDevice, Control, Point> MenuRequested;
@@ -29,7 +29,7 @@ namespace USBofon
 
             _empty.AutoSize = false;
             _empty.TextAlign = ContentAlignment.MiddleCenter;
-            _empty.ForeColor = Color.FromArgb(107, 114, 128);
+            _empty.ForeColor = Theme.Subtext;
             _empty.Font = new Font("Segoe UI", 11f);
         }
 
@@ -65,7 +65,7 @@ namespace USBofon
                         Height = LogicalToDeviceUnits(34),
                         TextAlign = ContentAlignment.BottomLeft,
                         Font = new Font("Segoe UI Semibold", 8.5f),
-                        ForeColor = Color.FromArgb(107, 114, 128),
+                        ForeColor = Theme.Subtext,
                         Margin = new Padding(LogicalToDeviceUnits(4), 0, 0, LogicalToDeviceUnits(6)),
                     });
                 }
@@ -128,9 +128,9 @@ namespace USBofon
         private static readonly Font GlyphFont = new Font("Segoe MDL2 Assets", 15f);
         private static readonly Font MenuFont = new Font("Segoe MDL2 Assets", 11f);
 
-        private static readonly Color Border = Color.FromArgb(229, 231, 235);
-        private static readonly Color TextMain = Color.FromArgb(17, 24, 39);
-        private static readonly Color TextSub = Color.FromArgb(107, 114, 128);
+        private static Color Border => Theme.Border;
+        private static Color TextMain => Theme.Text;
+        private static Color TextSub => Theme.Subtext;
         private static readonly Color On = Color.FromArgb(22, 163, 74);
         private static readonly Color Off = Color.FromArgb(203, 213, 225);
         private static readonly Color Danger = Color.FromArgb(220, 38, 38);
@@ -141,7 +141,7 @@ namespace USBofon
             _saved = saved;
             _kind = DevicePresentation.Kind(dev);
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = CardView.Background;
+            BackColor = Theme.Canvas;
             Height = LogicalToDeviceUnits(76);
             Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(8));
             Cursor = Cursors.Default;
@@ -165,7 +165,7 @@ namespace USBofon
 
             var card = new Rectangle(0, 0, Width - 1, Height - 1);
             using (var path = Rounded(card, S(10)))
-            using (var fill = new SolidBrush(Highlighted ? Color.FromArgb(254, 252, 232) : Color.White))
+            using (var fill = new SolidBrush(Highlighted ? Theme.Highlight : Theme.Card))
             using (var pen = new Pen(Highlighted ? Color.FromArgb(245, 158, 11) : _hover ? Color.FromArgb(191, 219, 254) : Border, Highlighted ? S(2) : 1))
             {
                 g.FillPath(fill, path);
@@ -216,7 +216,7 @@ namespace USBofon
             var subRect = new Rectangle(textLeft, Height / 2 + S(1), textWidth, S(20));
             TextRenderer.DrawText(g, title, TitleFont, titleRect, muted ? TextSub : TextMain,
                 TextFormatFlags.Left | TextFormatFlags.Bottom | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-            TextRenderer.DrawText(g, string.Join("  ·  ", parts), TextFont, subRect, TextSub,
+            TextRenderer.DrawText(g, string.Join("  ·  ", parts), TextFont, subRect, muted ? TextSub : Theme.Subtext,
                 TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
             // Переключатель.
@@ -239,7 +239,7 @@ namespace USBofon
             var m = MenuRect;
             if (_hoverMenu)
                 using (var path = Rounded(m, S(6)))
-                using (var b = new SolidBrush(Color.FromArgb(243, 244, 246)))
+                using (var b = new SolidBrush(Theme.Hover))
                     g.FillPath(b, path);
             TextRenderer.DrawText(g, "", MenuFont, m, TextSub,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);

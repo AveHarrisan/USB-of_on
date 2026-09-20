@@ -23,7 +23,7 @@ namespace USBofon
             _text.Dock = DockStyle.Fill;
             _text.ReadOnly = true;
             _text.BorderStyle = BorderStyle.None;
-            _text.BackColor = Color.White;
+            _text.BackColor = Theme.Surface;
             _text.DetectUrls = true;
             _text.Font = new Font("Segoe UI", 10f);
             _text.Margin = new Padding(0);
@@ -48,19 +48,23 @@ namespace USBofon
             CancelButton = close;
 
             Fill();
+
+            BackColor = Theme.Surface;
+            ForeColor = Theme.Text;
+            Theme.Apply(this);
         }
 
         private void H(string text)
         {
             _text.SelectionFont = new Font("Segoe UI Semibold", 12f);
-            _text.SelectionColor = Color.FromArgb(17, 24, 39);
+            _text.SelectionColor = Theme.Text;
             _text.AppendText((_text.TextLength == 0 ? "" : "\n") + text + "\n");
         }
 
         private void P(string text)
         {
             _text.SelectionFont = new Font("Segoe UI", 10f);
-            _text.SelectionColor = Color.FromArgb(31, 41, 55);
+            _text.SelectionColor = Theme.Text;
             _text.AppendText(text + "\n");
         }
 

@@ -47,6 +47,10 @@ namespace USBofon
             AcceptButton = yes;
             CancelButton = cancel;
             Shown += (s, e) => cancel.Focus();
+
+            BackColor = Theme.Surface;
+            ForeColor = Theme.Text;
+            Theme.Apply(this);
         }
     }
 }

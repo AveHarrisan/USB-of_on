@@ -90,6 +90,13 @@ namespace USBofon
             catch { }
         }
 
+        /// <summary>Тема приложения: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
+        public static int AppTheme
+        {
+            get => Clamp(GetNumber("AppTheme", 0), 0, 2);
+            set => SetNumber("AppTheme", Clamp(value, 0, 2));
+        }
+
         /// <summary>Тема виджета: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
         public static int WidgetTheme
         {

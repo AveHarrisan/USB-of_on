@@ -67,6 +67,7 @@ namespace USBofon
 
             _deviceChangeTimer.Tick += (s, e) => { _deviceChangeTimer.Stop(); RefreshDevices(); };
             BuildTray();
+            ApplyTheme();
 
             Load += (s, e) =>
             {
@@ -90,7 +91,7 @@ namespace USBofon
             {
                 GripStyle = ToolStripGripStyle.Hidden,
                 Padding = new Padding(10, 8, 10, 8),
-                BackColor = Color.White,
+                BackColor = Theme.Surface,
                 Renderer = new ModernRenderer(),
                 ImageScalingSize = new Size(16, 16),
                 Font = new Font("Segoe UI", 9.5f),
@@ -136,7 +137,7 @@ namespace USBofon
                 AutoSize = true,
                 Padding = new Padding(16, 10, 16, 10),
                 WrapContents = true,
-                BackColor = Color.White,
+                BackColor = Theme.Surface,
             };
             _search.Width = 300;
             _search.BorderStyle = BorderStyle.FixedSingle;
@@ -173,7 +174,7 @@ namespace USBofon
             _list.DoubleClick += (s, e) => RenameSelected();
             _list.KeyDown += OnListKeyDown;
 
-            var menu = new ContextMenuStrip();
+            var menu = new ContextMenuStrip { Renderer = new ModernRenderer(), BackColor = Theme.Surface };
             _miRename = new ToolStripMenuItem("Имя и заметка…", null, (s, e) => RenameSelected());
             var miReset = new ToolStripMenuItem("Вернуть имя по умолчанию", null, (s, e) =>
             {
@@ -208,7 +209,7 @@ namespace USBofon
 
             var statusStrip = new StatusStrip
             {
-                BackColor = Color.White,
+                BackColor = Theme.Surface,
                 Renderer = new ModernRenderer(),
                 SizingGrip = false,
             };
@@ -330,7 +331,7 @@ namespace USBofon
         {
             var saved = _store.Find(dev.InstanceId);
             var list = new List<UsbDevice> { dev };
-            var menu = new ContextMenuStrip();
+            var menu = new ContextMenuStrip { Renderer = new ModernRenderer(), BackColor = Theme.Surface };
             menu.Items.Add(new ToolStripMenuItem(string.IsNullOrEmpty(saved?.Name) ? "Дать имя…" : "Переименовать…", null, (s, e) => RenameDevice(dev)));
             if (!string.IsNullOrEmpty(saved?.Name))
                 menu.Items.Add(new ToolStripMenuItem("Вернуть имя по умолчанию", null, (s, e) => ResetName(dev)));
@@ -453,8 +454,28 @@ namespace USBofon
                 form.ShowDialog(this);
         }
 
+        /// <summary>Перекрашивает окно под выбранную тему.</summary>
+        public void ApplyTheme()
+        {
+            BackColor = Theme.Surface;
+            Theme.Apply(this);
+            _cards.BackColor = Theme.Canvas;
+            _list.BackColor = Theme.Surface;
+            _list.ForeColor = Theme.Text;
+            _status.ForeColor = Theme.Subtext;
+            foreach (Control control in Controls)
+                if (control is FlowLayoutPanel filters)
+                    foreach (Control child in filters.Controls)
+                        child.ForeColor = Theme.Text;
+            _search.BackColor = Theme.AppDark ? Color.FromArgb(38, 43, 54) : Color.White;
+            _search.ForeColor = Theme.Text;
+            FillList();
+            Invalidate(true);
+        }
+
         private void ApplySettings()
         {
+            ApplyTheme();
             if (Settings.WidgetVisible)
             {
                 if (_widget == null || _widget.IsDisposed) ShowWidget(true);
@@ -496,7 +517,7 @@ namespace USBofon
             _tray.Text = AppInfo.Name;
             _tray.Visible = true;
 
-            var menu = new ContextMenuStrip();
+            var menu = new ContextMenuStrip { Renderer = new ModernRenderer(), BackColor = Theme.Surface };
             var open = new ToolStripMenuItem("Открыть " + AppInfo.Name, null, (s, e) => ShowFromTray()) { Font = new Font(menu.Font, FontStyle.Bold) };
             var widget = new ToolStripMenuItem("Виджет на рабочем столе", null, (s, e) => ShowWidget(!Settings.WidgetVisible));
             var widgetLock = new ToolStripMenuItem("Закрепить виджет", null, (s, e) =>

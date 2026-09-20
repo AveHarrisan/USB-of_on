@@ -20,6 +20,8 @@ namespace USBofon
                 }
 
                 Application.EnableVisualStyles();
+                // Одно оформление на все меню, включая контекстные.
+                ToolStripManager.Renderer = new ModernRenderer();
                 Application.SetCompatibleTextRenderingDefault(false);
                 var form = new MainForm();
 

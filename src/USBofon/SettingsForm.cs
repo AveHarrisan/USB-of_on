@@ -26,20 +26,21 @@ namespace USBofon
             BackColor = Color.White;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
+            BackColor = Theme.Surface;
             _list.Dock = DockStyle.Fill;
             _list.FlowDirection = FlowDirection.TopDown;
             _list.WrapContents = false;
             _list.AutoScroll = true;
             _list.Padding = new Padding(18, 14, 18, 14);
-            _list.BackColor = Color.White;
+            _list.BackColor = Theme.Surface;
 
-            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Color.White };
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Theme.Surface };
             var close = new Button
             {
                 Text = "Закрыть",
                 DialogResult = DialogResult.OK,
                 Size = new Size(110, 32),
-                FlatStyle = FlatStyle.System,
+                FlatStyle = FlatStyle.Flat,
             };
             close.Location = new Point(ClientSize.Width - close.Width - 18, 12);
             close.Anchor = AnchorStyles.Right | AnchorStyles.Top;
@@ -47,7 +48,7 @@ namespace USBofon
             using (var line = new Panel()) { }
             bottom.Paint += (s, e) =>
             {
-                using (var pen = new Pen(Color.FromArgb(226, 232, 240)))
+                using (var pen = new Pen(Theme.Border))
                     e.Graphics.DrawLine(pen, 0, 0, bottom.Width, 0);
             };
 
@@ -58,6 +59,10 @@ namespace USBofon
 
             BuildSections();
             _loading = false;
+
+            BackColor = Theme.Surface;
+            ForeColor = Theme.Text;
+            Theme.Apply(this);
         }
 
         private void BuildSections()
@@ -98,6 +103,10 @@ namespace USBofon
                         Screen.PrimaryScreen.WorkingArea.Top + 24);
                     Apply();
                 })));
+
+            _list.Controls.Add(Section("Оформление", false,
+                Choice("Тема приложения", new[] { "как в Windows", "тёмная", "светлая" },
+                    () => Settings.AppTheme, v => Settings.AppTheme = v)));
 
             _list.Controls.Add(Section("Внешний вид виджета", false,
                 Choice("Тема", new[] { "как в Windows", "тёмная", "светлая" },
@@ -145,7 +154,7 @@ namespace USBofon
                 Size = new Size(480, 34),
                 TextAlign = ContentAlignment.MiddleLeft,
                 Font = new Font("Segoe UI Semibold", 10.5f),
-                ForeColor = Color.FromArgb(30, 41, 59),
+                ForeColor = Theme.Text,
                 Cursor = Cursors.Hand,
                 Margin = new Padding(0, 6, 0, 0),
             };
@@ -154,7 +163,7 @@ namespace USBofon
                 body.Visible = !body.Visible;
                 header.Text = (body.Visible ? "⌄  " : "›  ") + title;
             };
-            header.MouseEnter += (s, e) => header.BackColor = Color.FromArgb(243, 244, 246);
+            header.MouseEnter += (s, e) => header.BackColor = Theme.Hover;
             header.MouseLeave += (s, e) => header.BackColor = Color.Transparent;
 
             var panel = new FlowLayoutPanel
@@ -276,8 +285,8 @@ namespace USBofon
                 Text = Settings.WidgetColor == 0 ? "" : Theme.ToHex(Color.FromArgb(Settings.WidgetColor)),
                 Margin = new Padding(0, 3, 8, 0),
             };
-            var pick = new Button { Text = "Выбрать…", AutoSize = true, Margin = new Padding(0, 1, 8, 0), FlatStyle = FlatStyle.System };
-            var reset = new Button { Text = "Как в теме", AutoSize = true, Margin = new Padding(0, 1, 0, 0), FlatStyle = FlatStyle.System };
+            var pick = new Button { Text = "Выбрать…", AutoSize = true, Margin = new Padding(0, 1, 8, 0), FlatStyle = FlatStyle.Flat };
+            var reset = new Button { Text = "Как в теме", AutoSize = true, Margin = new Padding(0, 1, 0, 0), FlatStyle = FlatStyle.Flat };
 
             void Use(Color? color)
             {
@@ -316,7 +325,7 @@ namespace USBofon
 
         private static Control Button(string text, Action click)
         {
-            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(0, 4, 0, 8), FlatStyle = FlatStyle.System };
+            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(0, 4, 0, 8), FlatStyle = FlatStyle.Flat };
             button.Click += (s, e) => click();
             return button;
         }

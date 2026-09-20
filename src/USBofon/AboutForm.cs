@@ -86,6 +86,10 @@ namespace USBofon
             Controls.Add(root);
             AcceptButton = close;
             CancelButton = close;
+
+            BackColor = Theme.Surface;
+            ForeColor = Theme.Text;
+            Theme.Apply(this);
         }
 
         /// <summary>Имена и скрытые устройства лежат в ProgramData, а не рядом с программой.</summary>

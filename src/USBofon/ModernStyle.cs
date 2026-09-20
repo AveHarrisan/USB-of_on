@@ -6,10 +6,10 @@ namespace USBofon
     /// <summary>Спокойное современное оформление панели и меню: без градиентов и рамок девяностых.</summary>
     internal sealed class ModernColors : ProfessionalColorTable
     {
-        private static readonly Color Surface = Color.White;
-        private static readonly Color Hover = Color.FromArgb(238, 242, 255);
-        private static readonly Color Pressed = Color.FromArgb(224, 231, 255);
-        private static readonly Color Line = Color.FromArgb(226, 232, 240);
+        private static Color Surface => Theme.Surface;
+        private static Color Hover => Theme.Hover;
+        private static Color Pressed => Theme.Pressed;
+        private static Color Line => Theme.Border;
 
         public override Color ToolStripGradientBegin => Surface;
         public override Color ToolStripGradientMiddle => Surface;
@@ -63,7 +63,7 @@ namespace USBofon
                 base.OnRenderToolStripBorder(e);
                 return;
             }
-            using (var pen = new Pen(Color.FromArgb(226, 232, 240)))
+            using (var pen = new Pen(Theme.Border))
                 e.Graphics.DrawLine(pen, 0, e.AffectedBounds.Bottom - 1, e.ToolStrip.Width, e.AffectedBounds.Bottom - 1);
         }
 
@@ -73,9 +73,9 @@ namespace USBofon
             if (!item.Selected && !item.Pressed && !(item is ToolStripButton button && button.Checked))
                 return;
 
-            var color = item.Pressed ? Color.FromArgb(224, 231, 255)
-                : item is ToolStripButton b && b.Checked && !item.Selected ? Color.FromArgb(232, 236, 252)
-                : Color.FromArgb(238, 242, 255);
+            var color = item.Pressed ? Theme.Pressed
+                : item is ToolStripButton b && b.Checked && !item.Selected ? Theme.Pressed
+                : Theme.Hover;
             using (var brush = new SolidBrush(color))
             using (var path = Rounded(new Rectangle(1, 1, item.Width - 2, item.Height - 2), 6))
                 e.Graphics.FillPath(brush, path);
@@ -83,11 +83,42 @@ namespace USBofon
 
         protected override void OnRenderDropDownButtonBackground(ToolStripItemRenderEventArgs e) => OnRenderButtonBackground(e);
 
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            // Цвет пунктов задаём сами: иначе в тёмной теме остаётся системный тёмный текст.
+            if (!e.Item.Enabled) e.TextColor = Theme.Subtext;
+            else if (IsDefaultColor(e.Item.ForeColor)) e.TextColor = Theme.Text;
+            base.OnRenderItemText(e);
+        }
+
+        private static bool IsDefaultColor(Color color) =>
+            color.IsEmpty || color == SystemColors.ControlText || color == SystemColors.MenuText
+            || color == Color.FromArgb(17, 24, 39) || color == Color.FromArgb(248, 250, 252);
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            using (var back = new SolidBrush(Theme.Pressed))
+            using (var path = Rounded(new Rectangle(e.ImageRectangle.X - 2, e.ImageRectangle.Y - 2,
+                e.ImageRectangle.Width + 4, e.ImageRectangle.Height + 4), 4))
+                e.Graphics.FillPath(back, path);
+            using (var pen = new Pen(Theme.Text, 1.6f))
+            {
+                var r = e.ImageRectangle;
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                e.Graphics.DrawLines(pen, new[]
+                {
+                    new Point(r.Left + 3, r.Top + r.Height / 2),
+                    new Point(r.Left + r.Width / 2 - 1, r.Bottom - 4),
+                    new Point(r.Right - 3, r.Top + 3),
+                });
+            }
+        }
+
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
             if (e.Vertical)
             {
-                using (var pen = new Pen(Color.FromArgb(226, 232, 240)))
+                using (var pen = new Pen(Theme.Border))
                     e.Graphics.DrawLine(pen, e.Item.Width / 2, 6, e.Item.Width / 2, e.Item.Height - 6);
                 return;
             }
