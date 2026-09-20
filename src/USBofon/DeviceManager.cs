@@ -51,6 +51,7 @@ namespace USBofon
             AddDevicesWithBattery(present, result);
             MarkParts(result);
             AssignGHub(result, ghub);
+            DropDuplicateBattery(result);
             return result;
         }
 
@@ -253,6 +254,31 @@ namespace USBofon
                 dev.BatterySource = "G HUB, по типу устройства (" + match.Name + ")";
                 dev.KnownName = match.Name;
                 used.Add(match.Pid);
+            }
+        }
+
+        /// <summary>
+        /// Одно устройство не должно показываться дважды: заряд мыши может достаться и приёмнику,
+        /// который её опросил, и другому приёмнику по догадке. Оставляем одну запись.
+        /// </summary>
+        private static void DropDuplicateBattery(List<UsbDevice> devices)
+        {
+            var visible = devices
+                .Where(d => d.Present && d.Battery.HasValue && !d.IsHub && !d.IsInterface && !d.IsPart)
+                .ToList();
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dev in visible)
+            {
+                // Ключ: имя устройства, если известно, иначе заряд вместе с типом.
+                var key = !string.IsNullOrEmpty(dev.KnownName)
+                    ? "name:" + dev.KnownName
+                    : "kind:" + DevicePresentation.Kind(dev) + ":" + dev.Battery;
+                if (seen.Add(key)) continue;
+
+                dev.Battery = null;
+                dev.BatterySource = null;
+                dev.KnownName = null;
             }
         }
 

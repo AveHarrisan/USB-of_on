@@ -35,8 +35,15 @@ namespace USBofon
         private static readonly Dictionary<string, string> Values =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        public static string FilePath { get; } = Path.Combine(
+        public static string FilePath { get; private set; } = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "USB-of_on", "settings.json");
+
+        /// <summary>Запасное место, если в ProgramData писать не выходит.</summary>
+        private static readonly string UserPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "USB-of_on", "settings.json");
+
+        /// <summary>Что случилось при последней записи — попадает в отчёт.</summary>
+        public static string LastSaveResult { get; private set; } = "ещё не сохраняли";
 
         static Settings()
         {
@@ -210,6 +217,9 @@ namespace USBofon
 
         private static void Load()
         {
+            // Если в общей папке файла нет, а в пользовательской есть — читаем оттуда.
+            if (!System.IO.File.Exists(FilePath) && System.IO.File.Exists(UserPath)) FilePath = UserPath;
+
             if (System.IO.File.Exists(FilePath))
             {
                 using (var stream = System.IO.File.OpenRead(FilePath))
@@ -237,23 +247,35 @@ namespace USBofon
 
         private static void Save()
         {
+            if (TrySave(FilePath)) return;
+
+            // В общей папке не вышло — пишем в пользовательскую, чтобы настройки не терялись.
+            if (TrySave(UserPath))
+            {
+                FilePath = UserPath;
+                LastSaveResult = "общая папка недоступна, сохраняем в " + UserPath;
+            }
+        }
+
+        private static bool TrySave(string path)
+        {
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
                 var file = new File_();
                 foreach (var pair in Values) file.Items.Add(new Item { Name = pair.Key, Value = pair.Value });
 
-                var temp = FilePath + ".tmp";
-                using (var stream = System.IO.File.Create(temp))
+                using (var stream = System.IO.File.Create(path))
                 using (var writer = JsonReaderWriterFactory.CreateJsonWriter(stream, Encoding.UTF8, true, true))
                     new DataContractJsonSerializer(typeof(File_)).WriteObject(writer, file);
 
-                if (System.IO.File.Exists(FilePath)) System.IO.File.Replace(temp, FilePath, null);
-                else System.IO.File.Move(temp, FilePath);
+                LastSaveResult = "сохранено в " + path;
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // Нет прав на запись — настройки останутся только на время работы программы.
+                LastSaveResult = "не удалось записать " + path + ": " + ex.Message;
+                return false;
             }
         }
     }

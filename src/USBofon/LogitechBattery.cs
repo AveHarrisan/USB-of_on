@@ -62,17 +62,26 @@ namespace USBofon
         {
             foreach (var iface in interfaces)
             {
-                if (iface.Vendor != LogitechVendor || iface.UsagePage < 0xFF00) continue;
-                if (!Supported(iface.OutputLength)) continue;
+                if (iface.Vendor != LogitechVendor) continue;
+                if (iface.UsagePage < 0xFF00 || !Supported(iface.OutputLength))
+                {
+                    Log.Add($"{Short(iface.Path)}: пропуск — usage {iface.UsagePage:X2}, выход {iface.OutputLength}");
+                    continue;
+                }
 
                 if (Cache.TryGetValue(iface.DevInst, out var cached) && DateTime.Now - cached.Read < CacheTime)
                 {
                     result[iface.DevInst] = cached.Value;
+                    Log.Add($"{Short(iface.Path)} ({iface.OutputLength} байт): из запаса — "
+                            + $"{cached.Value.Percent}% «{cached.Value.Name}»");
                     continue;
                 }
 
                 if (Silent.TryGetValue(iface.DevInst, out var silentSince) && DateTime.Now - silentSince < CacheTime)
+                {
+                    Log.Add($"{Short(iface.Path)} ({iface.OutputLength} байт): молчало недавно, не трогаем");
                     continue;
+                }
 
                 var answer = Query(iface.Path, iface.OutputLength);
                 if (answer != null)
