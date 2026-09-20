@@ -25,6 +25,7 @@ namespace USBofon
                  + ", процесс " + (Environment.Is64BitProcess ? "64-бит" : "32-бит"));
             Line("Права администратора: " + IsAdmin());
             Line("Файл имён: " + store.FilePath);
+            Line("Файл настроек: " + Settings.FilePath);
             Line();
 
             Line("== Источники заряда ==");

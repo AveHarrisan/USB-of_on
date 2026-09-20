@@ -1,11 +1,56 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
+using System.Text;
 using Microsoft.Win32;
 
 namespace USBofon
 {
-    /// <summary>Личные настройки пользователя (вид окна) — в реестре HKCU.</summary>
+    /// <summary>
+    /// Настройки. Хранятся в файле рядом с именами устройств — в ProgramData, а не в реестре
+    /// пользователя: программа запускается от администратора, и у разных запусков реестр мог отличаться,
+    /// отчего настройки выглядели сброшенными. Прежние значения из реестра переносятся при первом запуске.
+    /// </summary>
     internal static class Settings
     {
-        private const string Key = @"Software\USB-of_on";
+        private const string RegistryKey = @"Software\USB-of_on";
+
+        [DataContract]
+        private sealed class Item
+        {
+            [DataMember(Order = 1)] public string Name;
+            [DataMember(Order = 2)] public string Value;
+        }
+
+        [DataContract]
+        private sealed class File_
+        {
+            [DataMember(Order = 1)] public List<Item> Items = new List<Item>();
+        }
+
+        private static readonly object Lock = new object();
+        private static readonly Dictionary<string, string> Values =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        public static string FilePath { get; } = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "USB-of_on", "settings.json");
+
+        static Settings()
+        {
+            try { Load(); }
+            catch { }
+        }
+
+        // ——— сами настройки ———
+
+        public static bool SimpleView
+        {
+            get => GetText("View", "simple") != "detailed";
+            set => SetText("View", value ? "simple" : "detailed");
+        }
 
         public static bool StartMinimized
         {
@@ -27,6 +72,26 @@ namespace USBofon
             set => SetFlag("NotifyConnected", value);
         }
 
+        /// <summary>Тема приложения: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
+        public static int AppTheme
+        {
+            get => Clamp(GetNumber("AppTheme", 0), 0, 2);
+            set => SetNumber("AppTheme", Clamp(value, 0, 2));
+        }
+
+        /// <summary>Тема виджета: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
+        public static int WidgetTheme
+        {
+            get => Clamp(GetNumber("WidgetTheme", 0), 0, 2);
+            set => SetNumber("WidgetTheme", Clamp(value, 0, 2));
+        }
+
+        /// <summary>Свой цвет подложки виджета (ARGB). 0 — брать из темы.</summary>
+        public static int WidgetColor
+        {
+            get => GetNumber("WidgetColor", 0);
+            set => SetNumber("WidgetColor", value);
+        }
 
         /// <summary>Плотность подложки виджета, 0–100 %: 0 — только текст поверх обоев.</summary>
         public static int WidgetBackground
@@ -52,6 +117,35 @@ namespace USBofon
             set => SetNumber("WidgetContent", Clamp(value, 0, 3));
         }
 
+        public static bool WidgetVisible
+        {
+            get => GetFlag("WidgetVisible");
+            set => SetFlag("WidgetVisible", value);
+        }
+
+        public static bool WidgetLocked
+        {
+            get => GetFlag("WidgetLocked");
+            set => SetFlag("WidgetLocked", value);
+        }
+
+        /// <summary>Где стоит виджет; null — ещё не ставили.</summary>
+        public static Point? WidgetPosition
+        {
+            get
+            {
+                var x = GetNumber("WidgetX", int.MinValue);
+                var y = GetNumber("WidgetY", int.MinValue);
+                return x == int.MinValue || y == int.MinValue ? (Point?)null : new Point(x, y);
+            }
+            set
+            {
+                if (value == null) return;
+                SetNumber("WidgetX", value.Value.X);
+                SetNumber("WidgetY", value.Value.Y);
+            }
+        }
+
         /// <summary>Как часто обновлять заряд, минуты.</summary>
         public static int BatteryMinutes
         {
@@ -71,131 +165,81 @@ namespace USBofon
             set => SetFlag("UseSynapse", value);
         }
 
+        // ——— чтение и запись ———
+
         private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 
-        private static int GetNumber(string name, int fallback)
+        private static bool GetFlag(string name, bool fallback = false) =>
+            GetNumber(name, fallback ? 1 : 0) == 1;
+
+        private static void SetFlag(string name, bool value) => SetNumber(name, value ? 1 : 0);
+
+        private static int GetNumber(string name, int fallback) =>
+            int.TryParse(GetText(name, null), out var value) ? value : fallback;
+
+        private static void SetNumber(string name, int value) => SetText(name, value.ToString());
+
+        private static string GetText(string name, string fallback)
         {
-            try
-            {
-                using (var k = Registry.CurrentUser.OpenSubKey(Key))
-                    return k?.GetValue(name) is int v ? v : fallback;
-            }
-            catch { return fallback; }
+            lock (Lock)
+                return Values.TryGetValue(name, out var value) ? value : fallback;
         }
 
-        private static void SetNumber(string name, int value)
+        private static void SetText(string name, string value)
         {
+            lock (Lock)
+            {
+                Values[name] = value;
+                Save();
+            }
+        }
+
+        private static void Load()
+        {
+            if (System.IO.File.Exists(FilePath))
+            {
+                using (var stream = System.IO.File.OpenRead(FilePath))
+                {
+                    var file = (File_)new DataContractJsonSerializer(typeof(File_)).ReadObject(stream);
+                    foreach (var item in file.Items ?? new List<Item>())
+                        if (!string.IsNullOrEmpty(item.Name)) Values[item.Name] = item.Value;
+                }
+                return;
+            }
+
+            // Первый запуск после обновления: забираем, что было в реестре.
             try
             {
-                using (var k = Registry.CurrentUser.CreateSubKey(Key))
-                    k?.SetValue(name, value, RegistryValueKind.DWord);
+                using (var key = Registry.CurrentUser.OpenSubKey(RegistryKey))
+                {
+                    if (key == null) return;
+                    foreach (var name in key.GetValueNames())
+                        Values[name] = Convert.ToString(key.GetValue(name));
+                }
+                if (Values.Count > 0) Save();
             }
             catch { }
         }
 
-        /// <summary>Тема приложения: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
-        public static int AppTheme
-        {
-            get => Clamp(GetNumber("AppTheme", 0), 0, 2);
-            set => SetNumber("AppTheme", Clamp(value, 0, 2));
-        }
-
-        /// <summary>Тема виджета: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
-        public static int WidgetTheme
-        {
-            get => Clamp(GetNumber("WidgetTheme", 0), 0, 2);
-            set => SetNumber("WidgetTheme", Clamp(value, 0, 2));
-        }
-
-        /// <summary>Свой цвет подложки виджета (ARGB). 0 — брать из темы.</summary>
-        public static int WidgetColor
-        {
-            get => GetNumber("WidgetColor", 0);
-            set => SetNumber("WidgetColor", value);
-        }
-
-        public static bool WidgetVisible
-        {
-            get => GetFlag("WidgetVisible");
-            set => SetFlag("WidgetVisible", value);
-        }
-
-        public static bool WidgetLocked
-        {
-            get => GetFlag("WidgetLocked");
-            set => SetFlag("WidgetLocked", value);
-        }
-
-        /// <summary>Где стоит виджет; null — ещё не ставили.</summary>
-        public static System.Drawing.Point? WidgetPosition
-        {
-            get
-            {
-                try
-                {
-                    using (var k = Registry.CurrentUser.OpenSubKey(Key))
-                    {
-                        if (k?.GetValue("WidgetX") is int x && k.GetValue("WidgetY") is int y)
-                            return new System.Drawing.Point(x, y);
-                    }
-                }
-                catch { }
-                return null;
-            }
-            set
-            {
-                if (value == null) return;
-                try
-                {
-                    using (var k = Registry.CurrentUser.CreateSubKey(Key))
-                    {
-                        k?.SetValue("WidgetX", value.Value.X, RegistryValueKind.DWord);
-                        k?.SetValue("WidgetY", value.Value.Y, RegistryValueKind.DWord);
-                    }
-                }
-                catch { }
-            }
-        }
-
-        private static bool GetFlag(string name, bool fallback = false)
+        private static void Save()
         {
             try
             {
-                using (var k = Registry.CurrentUser.OpenSubKey(Key))
-                    return k?.GetValue(name) is int v ? v == 1 : fallback;
-            }
-            catch { return fallback; }
-        }
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
+                var file = new File_();
+                foreach (var pair in Values) file.Items.Add(new Item { Name = pair.Key, Value = pair.Value });
 
-        private static void SetFlag(string name, bool value)
-        {
-            try
-            {
-                using (var k = Registry.CurrentUser.CreateSubKey(Key))
-                    k?.SetValue(name, value ? 1 : 0, RegistryValueKind.DWord);
-            }
-            catch { }
-        }
+                var temp = FilePath + ".tmp";
+                using (var stream = System.IO.File.Create(temp))
+                using (var writer = JsonReaderWriterFactory.CreateJsonWriter(stream, Encoding.UTF8, true, true))
+                    new DataContractJsonSerializer(typeof(File_)).WriteObject(writer, file);
 
-        public static bool SimpleView
-        {
-            get
-            {
-                try
-                {
-                    using (var k = Registry.CurrentUser.OpenSubKey(Key))
-                        return !(k?.GetValue("View") is string v) || v != "detailed";
-                }
-                catch { return true; }
+                if (System.IO.File.Exists(FilePath)) System.IO.File.Replace(temp, FilePath, null);
+                else System.IO.File.Move(temp, FilePath);
             }
-            set
+            catch
             {
-                try
-                {
-                    using (var k = Registry.CurrentUser.CreateSubKey(Key))
-                        k?.SetValue("View", value ? "simple" : "detailed");
-                }
-                catch { }
+                // Нет прав на запись — настройки останутся только на время работы программы.
             }
         }
     }

@@ -187,7 +187,8 @@ namespace USBofon
             if (ghub.Count == 0) return;
             var used = new HashSet<ushort>();
 
-            foreach (var dev in devices.Where(d => d.Present && !d.Battery.HasValue && IsLogitech(d)))
+            foreach (var dev in devices.Where(d => d.Present && !d.Battery.HasValue && IsLogitech(d)
+                                                   && !d.IsPart && !d.IsInterface && !d.IsHub))
             {
                 if (!ushort.TryParse(dev.Pid ?? "", System.Globalization.NumberStyles.HexNumber, null, out var pid)) continue;
                 var exact = ghub.FirstOrDefault(e => e.Pid == pid);
