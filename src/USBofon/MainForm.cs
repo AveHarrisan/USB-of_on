@@ -344,11 +344,33 @@ namespace USBofon
             menu.Show(owner, at);
         }
 
+        /// <summary>Полоса обновления тоже живёт по теме: иначе в тёмной она остаётся светлой.</summary>
+        private void StyleUpdateBar()
+        {
+            _updateBar.BackColor = Theme.UpdateBar;
+            foreach (Control child in _updateBar.Controls)
+            {
+                child.BackColor = Theme.UpdateBar;
+                foreach (Control item in child.Controls)
+                {
+                    item.BackColor = Theme.UpdateBar;
+                    item.ForeColor = Theme.Text;
+                }
+            }
+            _updateText.ForeColor = Theme.Text;
+            _updateNotes.LinkColor = Theme.Link;
+            _updateNotes.ActiveLinkColor = Theme.Link;
+            _updateNotes.VisitedLinkColor = Theme.Link;
+            _updateButton.BackColor = Theme.Card;
+            _updateButton.ForeColor = Theme.Text;
+            _updateButton.FlatAppearance.BorderColor = Theme.Border;
+        }
+
         private void BuildUpdateBar()
         {
             _updateBar.Dock = DockStyle.Top;
             _updateBar.Height = 40;
-            _updateBar.BackColor = Color.FromArgb(232, 245, 233);
+            _updateBar.BackColor = Theme.UpdateBar;
             _updateBar.Padding = new Padding(10, 6, 10, 6);
             _updateBar.Visible = false;
 
@@ -361,6 +383,7 @@ namespace USBofon
             _updateNotes.LinkClicked += (s, e) => ShowNotes();
             _updateButton.Text = "Обновить";
             _updateButton.AutoSize = true;
+            _updateButton.FlatStyle = FlatStyle.Flat;
             _updateButton.Margin = new Padding(0, 0, 12, 0);
             _updateButton.Click += (s, e) => StartUpdate();
             _updateProgress.Width = 200;
@@ -463,6 +486,7 @@ namespace USBofon
             _list.BackColor = Theme.Surface;
             _list.ForeColor = Theme.Text;
             _status.ForeColor = Theme.Subtext;
+            StyleUpdateBar();
             foreach (Control control in Controls)
                 if (control is FlowLayoutPanel filters)
                     foreach (Control child in filters.Controls)

@@ -166,7 +166,7 @@ namespace USBofon
             var card = new Rectangle(0, 0, Width - 1, Height - 1);
             using (var path = Rounded(card, S(10)))
             using (var fill = new SolidBrush(Highlighted ? Theme.Highlight : Theme.Card))
-            using (var pen = new Pen(Highlighted ? Color.FromArgb(245, 158, 11) : _hover ? Color.FromArgb(191, 219, 254) : Border, Highlighted ? S(2) : 1))
+            using (var pen = new Pen(Highlighted ? Color.FromArgb(245, 158, 11) : _hover ? Theme.HoverBorder : Border, Highlighted ? S(2) : 1))
             {
                 g.FillPath(fill, path);
                 g.DrawPath(pen, path);

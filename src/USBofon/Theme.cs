@@ -73,6 +73,12 @@ namespace USBofon
         public static Color Subtext => AppDark ? Color.FromArgb(190, 199, 212) : Color.FromArgb(107, 114, 128);
         public static Color Hover => AppDark ? Color.FromArgb(44, 50, 62) : Color.FromArgb(238, 242, 255);
         public static Color Pressed => AppDark ? Color.FromArgb(55, 62, 78) : Color.FromArgb(224, 231, 255);
+        /// <summary>Рамка карточки под курсором.</summary>
+        public static Color HoverBorder => AppDark ? Color.FromArgb(88, 110, 155) : Color.FromArgb(191, 219, 254);
+        /// <summary>Полоса «вышла новая версия».</summary>
+        public static Color UpdateBar => AppDark ? Color.FromArgb(22, 48, 38) : Color.FromArgb(232, 245, 233);
+        public static Color Link => AppDark ? Color.FromArgb(125, 190, 255) : Color.FromArgb(37, 99, 235);
+
         public static Color Highlight => AppDark ? Color.FromArgb(70, 60, 24) : Color.FromArgb(254, 243, 199);
 
         /// <summary>Раскрашивает окно и всё, что внутри, под выбранную тему.</summary>
@@ -112,6 +118,12 @@ namespace USBofon
                             button.ForeColor = Text;
                             button.FlatAppearance.BorderColor = Border;
                         }
+                        break;
+                    case LinkLabel link:
+                        link.BackColor = Color.Transparent;
+                        link.LinkColor = Link;
+                        link.ActiveLinkColor = Link;
+                        link.VisitedLinkColor = Link;
                         break;
                     case Label label:
                         label.ForeColor = label.ForeColor == SystemColors.GrayText || label.ForeColor == Subtext
