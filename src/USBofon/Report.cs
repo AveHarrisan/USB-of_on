@@ -41,6 +41,13 @@ namespace USBofon
 
             var razer = Settings.UseSynapse ? RazerBattery.Read() : new List<(string Name, int Percent)>();
             Line("Журнал Synapse дал записей: " + razer.Count);
+            Line("Прямой опрос устройств: " + (Settings.AskDevices ? "включён" : "выключен"));
+            if (Settings.AskDevices)
+            {
+                var direct = LogitechBattery.ReadAll();
+                Line("   ответили: " + direct.Count);
+                foreach (var line in LogitechBattery.Log) Line("   " + line);
+            }
             foreach (var entry in razer)
                 Line($"   «{entry.Name}» = {entry.Percent}%");
             Line();

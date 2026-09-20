@@ -13,8 +13,15 @@ namespace USBofon
     internal static class LogitechBattery
     {
         private const ushort LogitechVendor = 0x046D;
-        private const byte LongReport = 0x11;
-        private const int LongReportSize = 20;
+        // HID++ бывает трёх размеров: короткий, длинный и очень длинный. У гарнитур вроде G435
+        // доступен только очень длинный — 64 байта плюс номер отчёта.
+        /// <summary>Номер отчёта по размеру коллекции: короткий, длинный и очень длинный.</summary>
+        private static byte ReportFor(int size) => size == 7 ? (byte)0x10 : size == 20 ? (byte)0x11 : (byte)0x12;
+
+        private static bool Supported(int size) => size == 7 || size == 20 || size >= 32;
+
+        /// <summary>Что происходило при опросе — попадает в отчёт.</summary>
+        public static readonly List<string> Log = new List<string>();
 
         // Возможности HID++: UnifiedBattery отдаёт проценты, BatteryStatus — уровень разряда.
         private const ushort FeatureUnifiedBattery = 0x1004;
@@ -38,6 +45,7 @@ namespace USBofon
         /// <summary>Спрашивает все приёмники и устройства Logitech: «узел устройства → проценты».</summary>
         public static Dictionary<uint, Answer> ReadAll()
         {
+            Log.Clear();
             var result = new Dictionary<uint, Answer>();
             try
             {
@@ -54,8 +62,8 @@ namespace USBofon
         {
             foreach (var iface in interfaces)
             {
-                if (iface.Vendor != LogitechVendor || iface.UsagePage < 0xFF00 || iface.OutputLength != LongReportSize)
-                    continue;
+                if (iface.Vendor != LogitechVendor || iface.UsagePage < 0xFF00) continue;
+                if (!Supported(iface.OutputLength)) continue;
 
                 if (Cache.TryGetValue(iface.DevInst, out var cached) && DateTime.Now - cached.Read < CacheTime)
                 {
@@ -66,7 +74,7 @@ namespace USBofon
                 if (Silent.TryGetValue(iface.DevInst, out var silentSince) && DateTime.Now - silentSince < CacheTime)
                     continue;
 
-                var answer = Query(iface.Path);
+                var answer = Query(iface.Path, iface.OutputLength);
                 if (answer != null)
                 {
                     Silent.Remove(iface.DevInst);
@@ -80,18 +88,29 @@ namespace USBofon
             }
         }
 
-        private static Answer Query(string path)
+        private static Answer Query(string path, int size)
         {
+            var format = (Report: ReportFor(size), Size: size);
             var handle = CreateFile(path, 0xC0000000, 3, IntPtr.Zero, 3, FILE_FLAG_OVERLAPPED, IntPtr.Zero);
-            if (handle == INVALID_HANDLE) return null;
+            if (handle == INVALID_HANDLE)
+            {
+                Log.Add($"не открылось: {path}");
+                return null;
+            }
             try
             {
                 // 0xFF — устройство подключено прямо, 1..6 — место в приёмнике.
                 foreach (byte index in new byte[] { 0xFF, 1, 2, 3, 4, 5, 6 })
                 {
-                    var answer = QueryDevice(handle, index);
-                    if (answer != null) return answer;
+                    var answer = QueryDevice(handle, index, format);
+                    if (answer != null)
+                    {
+                        Log.Add($"отчёт 0x{format.Report:X2} ({size} байт), устройство {index:X2}: "
+                                + $"заряд {answer.Percent}%, имя «{answer.Name}»");
+                        return answer;
+                    }
                 }
+                Log.Add($"отчёт 0x{format.Report:X2} ({size} байт): ответа нет — {Short(path)}");
                 return null;
             }
             finally
@@ -100,21 +119,28 @@ namespace USBofon
             }
         }
 
-        private static Answer QueryDevice(IntPtr handle, byte index)
+        private static string Short(string path)
+        {
+            var start = path.IndexOf("vid_", StringComparison.OrdinalIgnoreCase);
+            return start < 0 ? path : path.Substring(start, Math.Min(30, path.Length - start));
+        }
+
+        private static Answer QueryDevice(IntPtr handle, byte index, (byte Report, int Size) format)
         {
             // Пинг корневой возможности: отвечают только живые устройства.
-            if (Call(handle, index, 0x00, 0x11, 0, 0, 0xAA) == null) return null;
+            if (Call(handle, index, 0x00, 0x11, 0, 0, 0xAA, format) == null) return null;
 
             foreach (var feature in new[] { FeatureUnifiedBattery, FeatureBatteryStatus })
             {
-                var lookup = Call(handle, index, 0x00, 0x01, (byte)(feature >> 8), (byte)feature, 0);
+                var lookup = Call(handle, index, 0x00, 0x01, (byte)(feature >> 8), (byte)feature, 0, format);
                 if (lookup == null || lookup[4] == 0) continue;
 
-                var answer = Call(handle, index, lookup[4], feature == FeatureUnifiedBattery ? (byte)0x11 : (byte)0x01, 0, 0, 0);
+                var answer = Call(handle, index, lookup[4],
+                    feature == FeatureUnifiedBattery ? (byte)0x11 : (byte)0x01, 0, 0, 0, format);
                 if (answer == null) continue;
 
                 var percent = answer[4];
-                if (percent <= 100) return new Answer { Percent = percent, Name = DeviceName(handle, index) };
+                if (percent <= 100) return new Answer { Percent = percent, Name = DeviceName(handle, index, format) };
             }
             return null;
         }
@@ -123,19 +149,19 @@ namespace USBofon
         /// Собственное название устройства по HID++ (возможность 0x0005): так узнаём, что за приёмником
         /// сидит «G502 X LIGHTSPEED», а не безымянный «USB Receiver».
         /// </summary>
-        private static string DeviceName(IntPtr handle, byte index)
+        private static string DeviceName(IntPtr handle, byte index, (byte Report, int Size) format)
         {
-            var lookup = Call(handle, index, 0x00, 0x01, 0x00, 0x05, 0);
+            var lookup = Call(handle, index, 0x00, 0x01, 0x00, 0x05, 0, format);
             if (lookup == null || lookup[4] == 0) return null;
             var feature = lookup[4];
 
-            var count = Call(handle, index, feature, 0x01, 0, 0, 0);
+            var count = Call(handle, index, feature, 0x01, 0, 0, 0, format);
             if (count == null || count[4] == 0) return null;
 
             var name = new System.Text.StringBuilder();
             for (byte position = 0; position < count[4] && name.Length < 64; position += 16)
             {
-                var chunk = Call(handle, index, feature, 0x11, position, 0, 0);
+                var chunk = Call(handle, index, feature, 0x11, position, 0, 0, format);
                 if (chunk == null) break;
                 for (var i = 4; i < chunk.Length; i++)
                 {
@@ -147,10 +173,11 @@ namespace USBofon
             return text.Length >= 3 ? text : null;
         }
 
-        private static byte[] Call(IntPtr handle, byte device, byte featureIndex, byte function, byte p0, byte p1, byte p2)
+        private static byte[] Call(IntPtr handle, byte device, byte featureIndex, byte function,
+            byte p0, byte p1, byte p2, (byte Report, int Size) format)
         {
-            var request = new byte[LongReportSize];
-            request[0] = LongReport;
+            var request = new byte[format.Size];
+            request[0] = format.Report;
             request[1] = device;
             request[2] = featureIndex;
             request[3] = function;
@@ -163,7 +190,7 @@ namespace USBofon
             var deadline = DateTime.Now.AddMilliseconds(900);
             while (DateTime.Now < deadline)
             {
-                var answer = Read(handle, 250);
+                var answer = Read(handle, 250, format.Size);
                 if (answer == null) continue;
                 if (answer[1] != device) continue;                       // ответ другому устройству приёмника
                 if (answer[2] == 0xFF && answer[4] == featureIndex) return null;   // ошибка на наш запрос
@@ -191,9 +218,9 @@ namespace USBofon
             }
         }
 
-        private static byte[] Read(IntPtr handle, int timeout)
+        private static byte[] Read(IntPtr handle, int timeout, int size)
         {
-            var buffer = new byte[LongReportSize];
+            var buffer = new byte[size];
             var wait = CreateEvent(IntPtr.Zero, true, false, null);
             var overlapped = AllocOverlapped(wait);
             try
