@@ -42,11 +42,14 @@ namespace USBofon
             set => SetNumber("WidgetOpacity", Clamp(value, 40, 100));
         }
 
-        /// <summary>Что показывать в виджете: 0 — только с зарядом, 1 — с зарядом и подписанные, 2 — всё подключённое.</summary>
+        /// <summary>
+        /// Что показывать в виджете: 0 — только с зарядом, 1 — с зарядом и подписанные,
+        /// 2 — всё подключённое, 3 — только подписанные.
+        /// </summary>
         public static int WidgetContent
         {
-            get => Clamp(GetNumber("WidgetContent", 1), 0, 2);
-            set => SetNumber("WidgetContent", Clamp(value, 0, 2));
+            get => Clamp(GetNumber("WidgetContent", 1), 0, 3);
+            set => SetNumber("WidgetContent", Clamp(value, 0, 3));
         }
 
         /// <summary>Как часто обновлять заряд, минуты.</summary>

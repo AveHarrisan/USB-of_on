@@ -635,7 +635,8 @@ namespace USBofon
                 .Where(x => x.Saved?.Hidden != true)
                 .Where(x => content == 2
                             || (content == 1 && (x.Dev.Battery.HasValue || !string.IsNullOrEmpty(x.Saved?.Name)))
-                            || (content == 0 && x.Dev.Battery.HasValue))
+                            || (content == 0 && x.Dev.Battery.HasValue)
+                            || (content == 3 && !string.IsNullOrEmpty(x.Saved?.Name)))
                 .OrderByDescending(x => x.Dev.Battery.HasValue)
                 .ThenBy(x => x.Dev.Battery ?? 0)
                 .ToList();

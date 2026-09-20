@@ -105,6 +105,7 @@ namespace USBofon
                         "только устройства с зарядом",
                         "с зарядом и подписанные",
                         "все подключённые",
+                        "только подписанные",
                     },
                     () => Settings.WidgetContent, v => Settings.WidgetContent = v),
                 Button("Вернуть виджет на место", () =>
