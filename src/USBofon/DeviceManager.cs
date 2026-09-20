@@ -42,7 +42,7 @@ namespace USBofon
             // Прямой опрос по HID++ — только если человек разрешил: он будит спящие устройства.
             var direct = PollBattery && Settings.AskDevices
                 ? LogitechBattery.ReadAll()
-                : new Dictionary<uint, int>();
+                : new Dictionary<uint, LogitechBattery.Answer>();
 
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
@@ -56,7 +56,7 @@ namespace USBofon
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
             Dictionary<string, List<string>> letters, List<(string Name, int Percent)> razer,
-            Dictionary<uint, int> direct, List<UsbDevice> result)
+            Dictionary<uint, LogitechBattery.Answer> direct, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -97,7 +97,7 @@ namespace USBofon
                             dev.Battery = Mark(dev, "Windows", Battery.ReadBluetooth(set, ref data))
                                 ?? Mark(dev, "Windows, у части устройства", ChildBattery(dev.DevInst, present, 0))
                                 ?? Mark(dev, "журнал Razer Synapse", RazerBattery.For(dev, razer))
-                                ?? Mark(dev, "прямой опрос HID++", DirectBattery(dev.DevInst, direct, 0));
+                                ?? DirectBattery(dev, direct);
                         dev.ParentId = ParentId(dev.DevInst);
                     }
 
@@ -117,17 +117,27 @@ namespace USBofon
             return percent;
         }
 
-        /// <summary>Заряд, полученный прямым опросом: он привязан к HID-интерфейсу внутри устройства.</summary>
-        private static int? DirectBattery(uint devInst, Dictionary<uint, int> direct, int depth)
+        /// <summary>Заряд и название, полученные прямым опросом: они привязаны к HID-интерфейсу внутри устройства.</summary>
+        private static int? DirectBattery(UsbDevice dev, Dictionary<uint, LogitechBattery.Answer> direct)
         {
             if (direct.Count == 0) return null;
+            var answer = FindDirect(dev.DevInst, direct, 0);
+            if (answer == null) return null;
+
+            dev.BatterySource = "прямой опрос HID++";
+            if (!string.IsNullOrEmpty(answer.Name)) dev.KnownName = answer.Name;
+            return answer.Percent;
+        }
+
+        private static LogitechBattery.Answer FindDirect(uint devInst, Dictionary<uint, LogitechBattery.Answer> direct, int depth)
+        {
             if (direct.TryGetValue(devInst, out var own)) return own;
             if (depth > 4 || CM_Get_Child(out var child, devInst, 0) != CR_SUCCESS) return null;
             do
             {
-                if (direct.TryGetValue(child, out var percent)) return percent;
-                var deeper = DirectBattery(child, direct, depth + 1);
-                if (deeper.HasValue) return deeper;
+                if (direct.TryGetValue(child, out var answer)) return answer;
+                var deeper = FindDirect(child, direct, depth + 1);
+                if (deeper != null) return deeper;
             } while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
             return null;
         }

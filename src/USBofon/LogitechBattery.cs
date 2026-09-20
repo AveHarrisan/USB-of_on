@@ -21,17 +21,24 @@ namespace USBofon
         private const ushort FeatureBatteryStatus = 0x1000;
 
         private static readonly TimeSpan CacheTime = TimeSpan.FromSeconds(60);
-        private static readonly Dictionary<uint, (int Percent, DateTime Read)> Cache =
-            new Dictionary<uint, (int, DateTime)>();
+        private static readonly Dictionary<uint, (Answer Value, DateTime Read)> Cache =
+            new Dictionary<uint, (Answer, DateTime)>();
+
+        /// <summary>Что ответило устройство: заряд и собственное название.</summary>
+        public sealed class Answer
+        {
+            public int Percent;
+            public string Name;
+        }
 
         // Устройства, которые на HID++ не отвечают (звуковые коллекции, чужие приёмники),
         // не дёргаем каждый раз: иначе опрос растягивается на секунды.
         private static readonly Dictionary<uint, DateTime> Silent = new Dictionary<uint, DateTime>();
 
         /// <summary>Спрашивает все приёмники и устройства Logitech: «узел устройства → проценты».</summary>
-        public static Dictionary<uint, int> ReadAll()
+        public static Dictionary<uint, Answer> ReadAll()
         {
-            var result = new Dictionary<uint, int>();
+            var result = new Dictionary<uint, Answer>();
             try
             {
                 var interfaces = Battery.HidInterfaces()
@@ -43,7 +50,7 @@ namespace USBofon
         }
 
         /// <summary>Дописывает найденный заряд в общую таблицу «узел устройства → проценты».</summary>
-        public static void Read(Dictionary<uint, int> result, IEnumerable<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength)> interfaces)
+        public static void Read(Dictionary<uint, Answer> result, IEnumerable<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength)> interfaces)
         {
             foreach (var iface in interfaces)
             {
@@ -52,19 +59,19 @@ namespace USBofon
 
                 if (Cache.TryGetValue(iface.DevInst, out var cached) && DateTime.Now - cached.Read < CacheTime)
                 {
-                    result[iface.DevInst] = cached.Percent;
+                    result[iface.DevInst] = cached.Value;
                     continue;
                 }
 
                 if (Silent.TryGetValue(iface.DevInst, out var silentSince) && DateTime.Now - silentSince < CacheTime)
                     continue;
 
-                var percent = Query(iface.Path);
-                if (percent.HasValue)
+                var answer = Query(iface.Path);
+                if (answer != null)
                 {
                     Silent.Remove(iface.DevInst);
-                    Cache[iface.DevInst] = (percent.Value, DateTime.Now);
-                    result[iface.DevInst] = percent.Value;
+                    Cache[iface.DevInst] = (answer, DateTime.Now);
+                    result[iface.DevInst] = answer;
                 }
                 else
                 {
@@ -73,7 +80,7 @@ namespace USBofon
             }
         }
 
-        private static int? Query(string path)
+        private static Answer Query(string path)
         {
             var handle = CreateFile(path, 0xC0000000, 3, IntPtr.Zero, 3, FILE_FLAG_OVERLAPPED, IntPtr.Zero);
             if (handle == INVALID_HANDLE) return null;
@@ -82,8 +89,8 @@ namespace USBofon
                 // 0xFF — устройство подключено прямо, 1..6 — место в приёмнике.
                 foreach (byte index in new byte[] { 0xFF, 1, 2, 3, 4, 5, 6 })
                 {
-                    var percent = QueryDevice(handle, index);
-                    if (percent.HasValue) return percent;
+                    var answer = QueryDevice(handle, index);
+                    if (answer != null) return answer;
                 }
                 return null;
             }
@@ -93,7 +100,7 @@ namespace USBofon
             }
         }
 
-        private static int? QueryDevice(IntPtr handle, byte index)
+        private static Answer QueryDevice(IntPtr handle, byte index)
         {
             // Пинг корневой возможности: отвечают только живые устройства.
             if (Call(handle, index, 0x00, 0x11, 0, 0, 0xAA) == null) return null;
@@ -107,9 +114,37 @@ namespace USBofon
                 if (answer == null) continue;
 
                 var percent = answer[4];
-                if (percent <= 100) return percent;
+                if (percent <= 100) return new Answer { Percent = percent, Name = DeviceName(handle, index) };
             }
             return null;
+        }
+
+        /// <summary>
+        /// Собственное название устройства по HID++ (возможность 0x0005): так узнаём, что за приёмником
+        /// сидит «G502 X LIGHTSPEED», а не безымянный «USB Receiver».
+        /// </summary>
+        private static string DeviceName(IntPtr handle, byte index)
+        {
+            var lookup = Call(handle, index, 0x00, 0x01, 0x00, 0x05, 0);
+            if (lookup == null || lookup[4] == 0) return null;
+            var feature = lookup[4];
+
+            var count = Call(handle, index, feature, 0x01, 0, 0, 0);
+            if (count == null || count[4] == 0) return null;
+
+            var name = new System.Text.StringBuilder();
+            for (byte position = 0; position < count[4] && name.Length < 64; position += 16)
+            {
+                var chunk = Call(handle, index, feature, 0x11, position, 0, 0);
+                if (chunk == null) break;
+                for (var i = 4; i < chunk.Length; i++)
+                {
+                    if (chunk[i] == 0) break;
+                    if (chunk[i] >= 32 && chunk[i] < 127) name.Append((char)chunk[i]);
+                }
+            }
+            var text = name.ToString().Trim();
+            return text.Length >= 3 ? text : null;
         }
 
         private static byte[] Call(IntPtr handle, byte device, byte featureIndex, byte function, byte p0, byte p1, byte p2)
