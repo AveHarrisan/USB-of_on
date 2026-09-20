@@ -10,6 +10,9 @@ namespace USBofon
     {
         private readonly Action _apply;
         private readonly FlowLayoutPanel _list = new FlowLayoutPanel();
+        private readonly Panel _scroll = new Panel();
+        private readonly List<(Label Header, string Title, Control Body)> _headers =
+            new List<(Label, string, Control)>();
         private bool _loading = true;
 
         public SettingsForm(Action apply)
@@ -27,12 +30,19 @@ namespace USBofon
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
             BackColor = Theme.Surface;
-            _list.Dock = DockStyle.Fill;
+            // Прокрутка живёт на внешней панели: так она появляется всегда, когда разделы раскрыты.
+            _scroll.Dock = DockStyle.Fill;
+            _scroll.AutoScroll = true;
+            _scroll.Padding = new Padding(18, 14, 4, 14);
+            _scroll.BackColor = Theme.Surface;
+
             _list.FlowDirection = FlowDirection.TopDown;
             _list.WrapContents = false;
-            _list.AutoScroll = true;
-            _list.Padding = new Padding(18, 14, 18, 14);
+            _list.AutoSize = true;
+            _list.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            _list.Location = new Point(0, 0);
             _list.BackColor = Theme.Surface;
+            _scroll.Controls.Add(_list);
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Theme.Surface };
             var close = new Button
@@ -52,12 +62,13 @@ namespace USBofon
                     e.Graphics.DrawLine(pen, 0, 0, bottom.Width, 0);
             };
 
-            Controls.Add(_list);
+            Controls.Add(_scroll);
             Controls.Add(bottom);
             AcceptButton = close;
             CancelButton = close;
 
             BuildSections();
+            ApplyTheme();
             _loading = false;
 
             BackColor = Theme.Surface;
@@ -162,9 +173,19 @@ namespace USBofon
             {
                 body.Visible = !body.Visible;
                 header.Text = (body.Visible ? "⌄  " : "›  ") + title;
+                _scroll.PerformLayout();
             };
-            header.MouseEnter += (s, e) => header.BackColor = Theme.Hover;
-            header.MouseLeave += (s, e) => header.BackColor = Color.Transparent;
+            header.MouseEnter += (s, e) =>
+            {
+                header.BackColor = Theme.Hover;
+                header.ForeColor = Theme.Text;
+            };
+            header.MouseLeave += (s, e) =>
+            {
+                header.BackColor = Theme.Surface;
+                header.ForeColor = Theme.Text;
+            };
+            _headers.Add((header, title, body));
 
             var panel = new FlowLayoutPanel
             {
@@ -199,6 +220,24 @@ namespace USBofon
         {
             if (_loading) return;
             _apply?.Invoke();
+            ApplyTheme();       // тему могли переключить прямо здесь — перекрашиваем окно сразу
+        }
+
+        /// <summary>Перекрашивает окно настроек под текущую тему.</summary>
+        private void ApplyTheme()
+        {
+            BackColor = Theme.Surface;
+            ForeColor = Theme.Text;
+            _scroll.BackColor = Theme.Surface;
+            _list.BackColor = Theme.Surface;
+            Theme.Apply(this);
+            foreach (var (header, title, body) in _headers)
+            {
+                header.BackColor = Theme.Surface;
+                header.ForeColor = Theme.Text;
+                header.Text = (body.Visible ? "⌄  " : "›  ") + title;
+            }
+            Invalidate(true);
         }
 
         private static Control Note(string text) => new Label
