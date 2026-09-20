@@ -90,6 +90,9 @@ namespace USBofon
         /// <summary>Название без служебных слов Windows: «Kingston DataTraveler 3.0», а не «Запоминающее устройство для USB».</summary>
         public static string FriendlyName(UsbDevice d)
         {
+            // Название от программы производителя точнее системного: «G502 X LIGHTSPEED», а не «USB Receiver».
+            if (!string.IsNullOrWhiteSpace(d.KnownName)) return d.KnownName.Trim();
+
             string Clean(string s) => Regex.Replace(s ?? "", @"\s+USB Device$", "", RegexOptions.IgnoreCase).Trim();
 
             foreach (var candidate in new[] { d.BusName }.Concat(d.Children).Concat(new[] { d.Description }))

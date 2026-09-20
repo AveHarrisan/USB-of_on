@@ -48,6 +48,17 @@ namespace USBofon
         /// </summary>
         public static async Task<ReleaseInfo> CheckAsync()
         {
+            // Сначала спрашиваем API — в нём есть описание выпуска и размер файла.
+            try
+            {
+                var byApi = await CheckByApiAsync().ConfigureAwait(false);
+                if (byApi != null) return Normalize(byApi.Version) > Normalize(AppInfo.Version) ? byApi : null;
+            }
+            catch
+            {
+                // API недоступен или исчерпан предел обращений — идём запасным путём.
+            }
+
             var version = await CheckByFileAsync().ConfigureAwait(false);
             if (version == null || Normalize(version) <= Normalize(AppInfo.Version)) return null;
 
@@ -61,6 +72,55 @@ namespace USBofon
             };
         }
 
+        /// <summary>Проверка через API GitHub: даёт описание выпуска и размер установщика.</summary>
+        private static async Task<ReleaseInfo> CheckByApiAsync()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                "https://api.github.com/repos/" + AppInfo.Repository + "/releases/latest");
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+            using (var response = await Http.SendAsync(request).ConfigureAwait(false))
+            {
+                response.EnsureSuccessStatusCode();
+                GhRelease release;
+                using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    release = (GhRelease)new DataContractJsonSerializer(typeof(GhRelease)).ReadObject(stream);
+
+                var asset = release.Assets?.FirstOrDefault(a =>
+                    string.Equals(a.Name, AppInfo.SetupAsset, StringComparison.OrdinalIgnoreCase));
+                if (release.Draft || release.Prerelease || asset == null) return null;
+                if (!Version.TryParse((release.TagName ?? "").TrimStart('v', 'V'), out var version)) return null;
+
+                return new ReleaseInfo
+                {
+                    Version = version,
+                    Notes = release.Body,
+                    PageUrl = release.HtmlUrl,
+                    SetupUrl = asset.Url,
+                    SetupSize = asset.Size,
+                };
+            }
+        }
+
+        [DataContract]
+        private sealed class GhRelease
+        {
+            [DataMember(Name = "tag_name")] public string TagName;
+            [DataMember(Name = "body")] public string Body;
+            [DataMember(Name = "html_url")] public string HtmlUrl;
+            [DataMember(Name = "draft")] public bool Draft;
+            [DataMember(Name = "prerelease")] public bool Prerelease;
+            [DataMember(Name = "assets")] public GhAsset[] Assets;
+        }
+
+        [DataContract]
+        private sealed class GhAsset
+        {
+            [DataMember(Name = "name")] public string Name;
+            [DataMember(Name = "browser_download_url")] public string Url;
+            [DataMember(Name = "size")] public long Size;
+        }
+
+        /// <summary>Запасной путь: номер версии лежит файлом в репозитории, предела обращений там нет.</summary>
         private static async Task<Version> CheckByFileAsync()
         {
             var text = await GetTextAsync(Raw + "docs/badges/version.json").ConfigureAwait(false);

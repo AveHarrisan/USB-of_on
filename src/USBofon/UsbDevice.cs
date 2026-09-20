@@ -21,6 +21,8 @@ namespace USBofon
         public int? Battery;
         /// <summary>Откуда взялся заряд — для отчёта.</summary>
         public string BatterySource;
+        /// <summary>Название от программы производителя: «G502 X LIGHTSPEED» вместо «USB Receiver».</summary>
+        public string KnownName;
 
         public bool Present;
         public bool Disabled;

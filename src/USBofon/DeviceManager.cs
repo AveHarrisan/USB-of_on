@@ -216,6 +216,7 @@ namespace USBofon
                 if (exact == null) continue;
                 dev.Battery = exact.Percent;
                 dev.BatterySource = "G HUB, по коду модели";
+                dev.KnownName = exact.Name;
                 used.Add(exact.Pid);
             }
 
@@ -240,6 +241,7 @@ namespace USBofon
 
                 dev.Battery = match.Percent;
                 dev.BatterySource = "G HUB, по типу устройства (" + match.Name + ")";
+                dev.KnownName = match.Name;
                 used.Add(match.Pid);
             }
         }
