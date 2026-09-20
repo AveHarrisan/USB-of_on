@@ -18,6 +18,8 @@ namespace USBofon
     {
         private const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000;
         private const int WM_NCHITTEST = 0x84, HTCAPTION = 2;
+        private const int WM_WINDOWPOSCHANGING = 0x46;
+        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
         private const int ULW_ALPHA = 2;
 
         private List<(string Title, string Note, int? Battery, Color Accent, bool Disabled)> _rows =
@@ -31,7 +33,7 @@ namespace USBofon
         {
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
-            TopMost = true;
+            TopMost = Settings.WidgetLayer == 0;
             StartPosition = FormStartPosition.Manual;
             Size = new Size(280, 140);
 
@@ -56,7 +58,12 @@ namespace USBofon
             }
         }
 
-        public void ApplyLook() => Redraw();
+        public void ApplyLook()
+        {
+            TopMost = Settings.WidgetLayer == 0;
+            if (Settings.WidgetLayer == 2) SendToBack();
+            Redraw();
+        }
 
         public void ApplyLock()
         {
@@ -88,9 +95,26 @@ namespace USBofon
         /// <summary>Перетаскивание за любое место — заголовка у виджета нет.</summary>
         protected override void WndProc(ref Message m)
         {
+            // «На рабочем столе»: при любой попытке всплыть отправляем окно обратно вниз.
+            if (m.Msg == WM_WINDOWPOSCHANGING && Settings.WidgetLayer == 2)
+            {
+                var position = (WINDOWPOS)Marshal.PtrToStructure(m.LParam, typeof(WINDOWPOS));
+                position.hwndInsertAfter = HWND_BOTTOM;
+                position.flags &= ~(uint)0x0004;   // SWP_NOZORDER убираем, чтобы порядок применился
+                Marshal.StructureToPtr(position, m.LParam, true);
+            }
+
             base.WndProc(ref m);
             if (m.Msg == WM_NCHITTEST && !Settings.WidgetLocked && m.Result == (IntPtr)1)
                 m.Result = (IntPtr)HTCAPTION;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINDOWPOS
+        {
+            public IntPtr hwnd, hwndInsertAfter;
+            public int x, y, cx, cy;
+            public uint flags;
         }
 
         private bool ShowHeader => !Settings.WidgetLocked;

@@ -100,6 +100,13 @@ namespace USBofon
                 Check("Закрепить виджет",
                     "Закреплённый виджет не ловит мышь: щелчки проходят сквозь него",
                     () => Settings.WidgetLocked, v => Settings.WidgetLocked = v),
+                Choice("Как держится среди окон", new[]
+                    {
+                        "поверх всех окон",
+                        "как обычное окно",
+                        "на рабочем столе, под окнами",
+                    },
+                    () => Settings.WidgetLayer, v => Settings.WidgetLayer = v),
                 Choice("Что показывать", new[]
                     {
                         "только устройства с зарядом",

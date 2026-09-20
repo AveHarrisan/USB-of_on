@@ -117,6 +117,13 @@ namespace USBofon
             set => SetNumber("WidgetContent", Clamp(value, 0, 3));
         }
 
+        /// <summary>Как виджет держится среди окон: 0 — поверх всех, 1 — обычное окно, 2 — на рабочем столе.</summary>
+        public static int WidgetLayer
+        {
+            get => Clamp(GetNumber("WidgetLayer", 0), 0, 2);
+            set => SetNumber("WidgetLayer", Clamp(value, 0, 2));
+        }
+
         public static bool WidgetVisible
         {
             get => GetFlag("WidgetVisible");
