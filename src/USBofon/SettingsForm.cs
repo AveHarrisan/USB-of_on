@@ -137,6 +137,10 @@ namespace USBofon
                     () => Settings.UseGHub, v => Settings.UseGHub = v),
                 Check("Брать заряд из журнала Razer Synapse", "Устройства Razer, пока Synapse запущен",
                     () => Settings.UseSynapse, v => Settings.UseSynapse = v),
+                Check("Спрашивать заряд у самих устройств Logitech",
+                    "Короткий запрос приёмнику по протоколу HID++. Работает без G HUB и показывает заряд мышей "
+                    + "и клавиатур, но спящее устройство от такого запроса просыпается. По умолчанию выключено.",
+                    () => Settings.AskDevices, v => Settings.AskDevices = v),
                 Slider("Обновлять заряд раз в", 1, 30, 1,
                     () => Settings.BatteryMinutes, v => Settings.BatteryMinutes = v, Minutes)));
         }

@@ -57,6 +57,51 @@ namespace USBofon
             return found;
         }
 
+        /// <summary>HID-коллекции устройств: нужны и для отчёта, и для прямого опроса Logitech.</summary>
+        public static List<(uint DevInst, string Path, ushort Vendor, ushort UsagePage, int OutputLength, string Name)> HidInterfaces()
+        {
+            var list = new List<(uint, string, ushort, ushort, int, string)>();
+            var guid = HidInterface;
+            var set = SetupDiGetClassDevsByGuid(ref guid, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+            if (set == INVALID_HANDLE_VALUE) return list;
+            try
+            {
+                var iface = new SP_DEVICE_INTERFACE_DATA { cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVICE_INTERFACE_DATA)) };
+                for (uint i = 0; SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref guid, i, ref iface); i++)
+                {
+                    var info = new SP_DEVINFO_DATA { cbSize = (uint)Marshal.SizeOf(typeof(SP_DEVINFO_DATA)) };
+                    var path = InterfacePath(set, ref iface, ref info);
+                    if (path == null) continue;
+
+                    var handle = CreateFile(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                    if (handle == INVALID_HANDLE_VALUE) continue;
+                    var preparsed = IntPtr.Zero;
+                    try
+                    {
+                        var attributes = new HIDD_ATTRIBUTES { Size = (uint)Marshal.SizeOf(typeof(HIDD_ATTRIBUTES)) };
+                        if (!HidD_GetAttributes(handle, ref attributes)) continue;
+                        if (!HidD_GetPreparsedData(handle, out preparsed)) continue;
+                        if (HidP_GetCaps(preparsed, out var caps) != HIDP_STATUS_SUCCESS) continue;
+
+                        var name = new System.Text.StringBuilder(128);
+                        HidD_GetProductString(handle, name, 256);
+                        list.Add((info.DevInst, path, attributes.VendorID, caps.UsagePage,
+                            caps.OutputReportByteLength, name.ToString()));
+                    }
+                    finally
+                    {
+                        if (preparsed != IntPtr.Zero) HidD_FreePreparsedData(preparsed);
+                        CloseHandle(handle);
+                    }
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(set);
+            }
+            return list;
+        }
+
         /// <summary>
         /// Для отчёта: какие HID-коллекции дают устройства. По ним видно приёмники и их служебные
         /// каналы. Устройства открываются без прав чтения и записи, то есть не просыпаются.

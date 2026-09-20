@@ -39,10 +39,14 @@ namespace USBofon
             // который и так знает его для своего окна. Спящая мышь от этого не просыпается.
             var ghub = PollBattery ? GHubBattery.Read() : new List<GHubBattery.Entry>();
             var razer = PollBattery ? RazerBattery.Read() : new List<(string Name, int Percent)>();
+            // Прямой опрос по HID++ — только если человек разрешил: он будит спящие устройства.
+            var direct = PollBattery && Settings.AskDevices
+                ? LogitechBattery.ReadAll()
+                : new Dictionary<uint, int>();
 
             var result = new List<UsbDevice>();
             foreach (var bus in Buses)
-                Enumerate(bus.Enumerator, bus.Bus, present, letters, razer, result);
+                Enumerate(bus.Enumerator, bus.Bus, present, letters, razer, direct, result);
 
             AddDevicesWithBattery(present, result);
             MarkParts(result);
@@ -51,7 +55,8 @@ namespace USBofon
         }
 
         private static void Enumerate(string enumerator, string bus, Dictionary<uint, NodeInfo> present,
-            Dictionary<string, List<string>> letters, List<(string Name, int Percent)> razer, List<UsbDevice> result)
+            Dictionary<string, List<string>> letters, List<(string Name, int Percent)> razer,
+            Dictionary<uint, int> direct, List<UsbDevice> result)
         {
             var set = SetupDiGetClassDevs(IntPtr.Zero, enumerator, IntPtr.Zero, DIGCF_ALLCLASSES);
             if (set == INVALID_HANDLE_VALUE) throw new Win32Exception();
@@ -91,7 +96,8 @@ namespace USBofon
                         if (!dev.IsHub)
                             dev.Battery = Mark(dev, "Windows", Battery.ReadBluetooth(set, ref data))
                                 ?? Mark(dev, "Windows, у части устройства", ChildBattery(dev.DevInst, present, 0))
-                                ?? Mark(dev, "журнал Razer Synapse", RazerBattery.For(dev, razer));
+                                ?? Mark(dev, "журнал Razer Synapse", RazerBattery.For(dev, razer))
+                                ?? Mark(dev, "прямой опрос HID++", DirectBattery(dev.DevInst, direct, 0));
                         dev.ParentId = ParentId(dev.DevInst);
                     }
 
@@ -109,6 +115,21 @@ namespace USBofon
         {
             if (percent.HasValue) dev.BatterySource = source;
             return percent;
+        }
+
+        /// <summary>Заряд, полученный прямым опросом: он привязан к HID-интерфейсу внутри устройства.</summary>
+        private static int? DirectBattery(uint devInst, Dictionary<uint, int> direct, int depth)
+        {
+            if (direct.Count == 0) return null;
+            if (direct.TryGetValue(devInst, out var own)) return own;
+            if (depth > 4 || CM_Get_Child(out var child, devInst, 0) != CR_SUCCESS) return null;
+            do
+            {
+                if (direct.TryGetValue(child, out var percent)) return percent;
+                var deeper = DirectBattery(child, direct, depth + 1);
+                if (deeper.HasValue) return deeper;
+            } while (CM_Get_Sibling(out child, child, 0) == CR_SUCCESS);
+            return null;
         }
 
         /// <summary>Заряд, который Windows знает у частей устройства: например, у Bluetooth-клавиатуры внутри составного.</summary>

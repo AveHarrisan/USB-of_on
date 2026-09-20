@@ -62,10 +62,13 @@ namespace USBofon
             LastDevicesJson = devices;
             if (devices == null) return result;
 
-            foreach (Match match in Regex.Matches(devices, @"""id"":\s*""(dev[0-9a-f]+)"",\s*""pid"":\s*(\d+)"))
+            foreach (Match match in Regex.Matches(devices, @"""id"":\s*""(dev[0-9a-f]+)"""))
             {
                 var id = match.Groups[1].Value;
-                if (!ushort.TryParse(match.Groups[2].Value, out var pid)) continue;
+                // Поля устройства идут блоком, но порядок бывает разным — ищем код модели рядом.
+                var block = devices.Substring(match.Index, Math.Min(4000, devices.Length - match.Index));
+                var pidMatch = Regex.Match(block, @"""pid"":\s*(\d+)");
+                if (!pidMatch.Success || !ushort.TryParse(pidMatch.Groups[1].Value, out var pid)) continue;
 
                 var state = Ask("/battery/" + id + "/state");
                 var percent = state == null ? Match.Empty : Regex.Match(state, @"""percentage"":\s*([0-9]+)");
@@ -82,7 +85,7 @@ namespace USBofon
                         : "без поля percentage";
 
                 // Тип и название берём из описания устройства: по ним сопоставим приёмник с его мышью.
-                var tail = devices.Substring(match.Index, Math.Min(3000, devices.Length - match.Index));
+                var tail = block;
                 var kind = Regex.Match(tail, @"""deviceType"":\s*""([A-Z_]+)""");
                 var name = Regex.Match(tail, @"""displayName"":\s*""([^""]+)""");
                 result.Add(new Entry
@@ -126,8 +129,17 @@ namespace USBofon
                 var buffer = new byte[64 * 1024];
                 for (var attempt = 0; attempt < 8; attempt++)
                 {
-                    var received = socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancel.Token).GetAwaiter().GetResult();
-                    var text = Encoding.UTF8.GetString(buffer, 0, received.Count);
+                    // Ответ приходит частями: собираем до конца сообщения, иначе список устройств обрывается.
+                    var message = new System.IO.MemoryStream();
+                    while (true)
+                    {
+                        var received = socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancel.Token).GetAwaiter().GetResult();
+                        if (received.MessageType == WebSocketMessageType.Close) return null;
+                        message.Write(buffer, 0, received.Count);
+                        if (received.EndOfMessage) break;
+                    }
+
+                    var text = Encoding.UTF8.GetString(message.ToArray());
                     if (text.Contains("\"msgId\"") && text.Contains("\"q\"")) return text;   // ответ именно на наш запрос
                 }
                 return null;

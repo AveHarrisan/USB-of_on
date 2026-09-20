@@ -159,6 +159,13 @@ namespace USBofon
             set => SetFlag("UseGHub", value);
         }
 
+        /// <summary>Спрашивать заряд у самих устройств Logitech по их протоколу. Будит спящие — по умолчанию выключено.</summary>
+        public static bool AskDevices
+        {
+            get => GetFlag("AskDevices");
+            set => SetFlag("AskDevices", value);
+        }
+
         public static bool UseSynapse
         {
             get => GetFlag("UseSynapse", true);
