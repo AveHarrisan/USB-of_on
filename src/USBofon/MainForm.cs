@@ -86,7 +86,15 @@ namespace USBofon
 
         private void BuildUi()
         {
-            var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6, 4, 6, 4) };
+            var toolbar = new ToolStrip
+            {
+                GripStyle = ToolStripGripStyle.Hidden,
+                Padding = new Padding(10, 8, 10, 8),
+                BackColor = Color.White,
+                Renderer = new ModernRenderer(),
+                ImageScalingSize = new Size(16, 16),
+                Font = new Font("Segoe UI", 9.5f),
+            };
             var btnRefresh = new ToolStripButton("Обновить", null, (s, e) => RefreshDevices()) { ToolTipText = "F5" };
             _btnRename = new ToolStripButton("Имя…", null, (s, e) => RenameSelected()) { ToolTipText = "Дать имя устройству (F2)" };
             _btnHide = new ToolStripButton("Скрыть", null, (s, e) => ToggleHiddenSelected()) { ToolTipText = "Скрыть устройство из списка (Del)" };
@@ -126,10 +134,12 @@ namespace USBofon
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
-                Padding = new Padding(8, 6, 8, 2),
+                Padding = new Padding(16, 10, 16, 10),
                 WrapContents = true,
+                BackColor = Color.White,
             };
-            _search.Width = 260;
+            _search.Width = 300;
+            _search.BorderStyle = BorderStyle.FixedSingle;
             _search.Margin = new Padding(0, 2, 16, 2);
             SetCue(_search, "Поиск по имени, описанию, серийному номеру…");
             _search.TextChanged += (s, e) => FillList();
@@ -196,7 +206,12 @@ namespace USBofon
             _cards.RenameRequested += RenameDevice;
             _cards.MenuRequested += ShowCardMenu;
 
-            var statusStrip = new StatusStrip();
+            var statusStrip = new StatusStrip
+            {
+                BackColor = Color.White,
+                Renderer = new ModernRenderer(),
+                SizingGrip = false,
+            };
             _status.Spring = true;
             _status.TextAlign = ContentAlignment.MiddleLeft;
             statusStrip.Items.Add(_status);

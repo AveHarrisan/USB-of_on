@@ -125,22 +125,25 @@ namespace USBofon
             Color Text(Color color) => Color.FromArgb(textAlpha, color);
 
             if (backAlpha > 0)
-                using (var back = new SolidBrush(Color.FromArgb(backAlpha, 17, 24, 39)))
+                using (var back = new SolidBrush(Color.FromArgb(backAlpha, Theme.WidgetBack)))
                 using (var path = Rounded(new Rectangle(0, 0, Width - 1, Height - 1), 10))
                     g.FillPath(back, path);
 
             // Тень под текстом нужна, когда подложка почти прозрачная: иначе текст теряется на обоях.
             var shadow = backAlpha < 140;
+            var main = Theme.WidgetText;
+            var sub = Theme.WidgetSubtext;
+            var shadowColor = Theme.WidgetShadow;
 
             var y = top;
             if (ShowHeader)
                 Draw(g, "USB-of_on  ·  перетащите мышью", HeadFont, new RectangleF(14, 12, Width - 28, 18),
-                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
+                    Text(sub), shadow, textAlpha, shadowColor);
 
             if (_rows.Count == 0)
             {
                 Draw(g, "Нет устройств для показа", NoteFont, new RectangleF(14, y, Width - 28, 20),
-                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
+                    Text(sub), shadow, textAlpha, shadowColor);
                 return;
             }
 
@@ -158,7 +161,7 @@ namespace USBofon
                         : Color.FromArgb(74, 222, 128);
                     var text = percent + "%";
                     var size = g.MeasureString(text, TitleFont);
-                    Draw(g, text, TitleFont, new RectangleF(right - size.Width, y + 1, size.Width + 2, 20), Text(color), shadow, textAlpha);
+                    Draw(g, text, TitleFont, new RectangleF(right - size.Width, y + 1, size.Width + 2, 20), Text(color), shadow, textAlpha, shadowColor);
                     right -= size.Width + 8;
 
                     var bar = new RectangleF(right - 42, y + 8, 42, 8);
@@ -172,23 +175,23 @@ namespace USBofon
                 {
                     var size = g.MeasureString("выкл", NoteFont);
                     Draw(g, "выкл", NoteFont, new RectangleF(right - size.Width, y + 4, size.Width + 2, 18),
-                        Text(Color.FromArgb(248, 113, 113)), shadow, textAlpha);
+                        Text(Color.FromArgb(248, 113, 113)), shadow, textAlpha, shadowColor);
                     right -= size.Width + 8;
                 }
 
-                Draw(g, row.Title, TitleFont, new RectangleF(30, y, right - 34, 18), Text(Color.White), shadow, textAlpha);
+                Draw(g, row.Title, TitleFont, new RectangleF(30, y, right - 34, 18), Text(main), shadow, textAlpha, shadowColor);
                 Draw(g, row.Note, NoteFont, new RectangleF(30, y + 16, right - 34, 16),
-                    Text(Color.FromArgb(203, 213, 225)), shadow, textAlpha);
+                    Text(sub), shadow, textAlpha, shadowColor);
                 y += 34;
             }
         }
 
-        private static void Draw(Graphics g, string text, Font font, RectangleF bounds, Color color, bool shadow, int alpha)
+        private static void Draw(Graphics g, string text, Font font, RectangleF bounds, Color color, bool shadow, int alpha, Color shadowColor)
         {
             using (var format = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter })
             {
                 if (shadow)
-                    using (var under = new SolidBrush(Color.FromArgb(Math.Min(alpha, 190), 0, 0, 0)))
+                    using (var under = new SolidBrush(Color.FromArgb(Math.Min(alpha, 190), shadowColor)))
                         g.DrawString(text, font, under, new RectangleF(bounds.X + 1, bounds.Y + 1, bounds.Width, bounds.Height), format);
                 using (var brush = new SolidBrush(color))
                     g.DrawString(text, font, brush, bounds, format);

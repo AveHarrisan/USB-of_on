@@ -90,6 +90,20 @@ namespace USBofon
             catch { }
         }
 
+        /// <summary>Тема виджета: 0 — как в Windows, 1 — тёмная, 2 — светлая.</summary>
+        public static int WidgetTheme
+        {
+            get => Clamp(GetNumber("WidgetTheme", 0), 0, 2);
+            set => SetNumber("WidgetTheme", Clamp(value, 0, 2));
+        }
+
+        /// <summary>Свой цвет подложки виджета (ARGB). 0 — брать из темы.</summary>
+        public static int WidgetColor
+        {
+            get => GetNumber("WidgetColor", 0);
+            set => SetNumber("WidgetColor", value);
+        }
+
         public static bool WidgetVisible
         {
             get => GetFlag("WidgetVisible");
