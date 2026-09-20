@@ -1,13 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace USBofon
 {
-    /// <summary>Все настройки в одном окне. Каждое изменение применяется сразу.</summary>
+    /// <summary>Настройки разделами: каждый раздел сворачивается, изменения применяются сразу.</summary>
     internal sealed class SettingsForm : Form
     {
         private readonly Action _apply;
+        private readonly FlowLayoutPanel _list = new FlowLayoutPanel();
         private bool _loading = true;
 
         public SettingsForm(Action apply)
@@ -19,90 +21,157 @@ namespace USBofon
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
             AutoScaleMode = AutoScaleMode.Dpi;
-            Font = SystemFonts.MessageBoxFont;
-            AutoSize = true;
-            AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            Padding = new Padding(16);
+            Font = new Font("Segoe UI", 9.5f);
+            ClientSize = new Size(560, 640);
+            BackColor = Color.White;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
-            var root = new FlowLayoutPanel
+            _list.Dock = DockStyle.Fill;
+            _list.FlowDirection = FlowDirection.TopDown;
+            _list.WrapContents = false;
+            _list.AutoScroll = true;
+            _list.Padding = new Padding(18, 14, 18, 14);
+            _list.BackColor = Color.White;
+
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Color.White };
+            var close = new Button
             {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                MaximumSize = new Size(560, 0),
+                Text = "Закрыть",
+                DialogResult = DialogResult.OK,
+                Size = new Size(110, 32),
+                FlatStyle = FlatStyle.System,
+            };
+            close.Location = new Point(ClientSize.Width - close.Width - 18, 12);
+            close.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            bottom.Controls.Add(close);
+            using (var line = new Panel()) { }
+            bottom.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(226, 232, 240)))
+                    e.Graphics.DrawLine(pen, 0, 0, bottom.Width, 0);
             };
 
-            root.Controls.Add(Head("Список устройств"));
-            root.Controls.Add(Check("Показывать только подписанные устройства",
-                "В списке останутся только устройства, которым вы дали имя",
-                () => Settings.NamedOnly, v => Settings.NamedOnly = v));
-            root.Controls.Add(Check("Уведомлять о подключении устройств",
-                "Уведомление у часов, когда вставляют флешку, токен или другое устройство",
-                () => Settings.NotifyConnected, v => Settings.NotifyConnected = v));
-
-            root.Controls.Add(Head("Запуск"));
-            root.Controls.Add(Check("Запускать при входе в Windows",
-                "Задача Планировщика с правами администратора, без окна контроля учётных записей",
-                () => Autostart.Enabled, SetAutostart));
-            root.Controls.Add(Check("Запускаться в трее",
-                "При автозапуске окно не открывается — только значок у часов",
-                () => Settings.StartMinimized, v => Settings.StartMinimized = v));
-
-            root.Controls.Add(Head("Виджет на рабочем столе"));
-            root.Controls.Add(Check("Показывать виджет", "Заряд и состояние устройств поверх окон",
-                () => Settings.WidgetVisible, v => Settings.WidgetVisible = v));
-            root.Controls.Add(Check("Закрепить виджет",
-                "Закреплённый виджет не ловит мышь: щелчки проходят сквозь него, случайно ничего не нажать",
-                () => Settings.WidgetLocked, v => Settings.WidgetLocked = v));
-            root.Controls.Add(Slider("Плотность подложки", 0, 100, 5,
-                () => Settings.WidgetBackground, v => Settings.WidgetBackground = v,
-                v => v == 0 ? "без подложки" : v + " %"));
-            root.Controls.Add(Slider("Непрозрачность", 40, 100, 5,
-                () => Settings.WidgetOpacity, v => Settings.WidgetOpacity = v, v => v + " %"));
-            root.Controls.Add(Choice("Что показывать в виджете", new[]
-                {
-                    "только устройства с зарядом",
-                    "с зарядом и подписанные",
-                    "все подключённые",
-                },
-                () => Settings.WidgetContent, v => Settings.WidgetContent = v));
-            root.Controls.Add(Button("Вернуть виджет на место", () =>
-            {
-                Settings.WidgetPosition = new Point(
-                    Screen.PrimaryScreen.WorkingArea.Right - 284,
-                    Screen.PrimaryScreen.WorkingArea.Top + 24);
-                Apply();
-            }));
-
-            root.Controls.Add(Head("Заряд устройств"));
-            root.Controls.Add(Note("Сами устройства программа не опрашивает — это будило бы беспроводные. "
-                                   + "Заряд берётся из данных Windows и у программ производителей."));
-            root.Controls.Add(Check("Брать заряд у Logitech G HUB", "Мыши, клавиатуры и гарнитуры Logitech, пока G HUB запущен",
-                () => Settings.UseGHub, v => Settings.UseGHub = v));
-            root.Controls.Add(Check("Брать заряд из журнала Razer Synapse", "Устройства Razer, пока Synapse запущен",
-                () => Settings.UseSynapse, v => Settings.UseSynapse = v));
-            root.Controls.Add(Slider("Обновлять заряд раз в", 1, 30, 1,
-                () => Settings.BatteryMinutes, v => Settings.BatteryMinutes = v, Minutes));
-
-            root.Controls.Add(Head("Если что-то показывается неверно"));
-            root.Controls.Add(Note("Соберите отчёт: в нём видно, какие устройства нашла программа, "
-                                   + "какой заряд сообщили Windows, G HUB и Synapse и откуда взято каждое значение. "
-                                   + "Файл текстовый, его можно прочитать перед отправкой."));
-
-            var close = new Button { Text = "Закрыть", AutoSize = true, DialogResult = DialogResult.OK, Margin = new Padding(0, 16, 0, 0) };
-            var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Dock = DockStyle.Fill };
-            buttons.Controls.Add(close);
-            root.Controls.Add(buttons);
-
-            Controls.Add(root);
+            Controls.Add(_list);
+            Controls.Add(bottom);
             AcceptButton = close;
             CancelButton = close;
+
+            BuildSections();
             _loading = false;
+        }
+
+        private void BuildSections()
+        {
+            _list.Controls.Add(Section("Список устройств", true,
+                Check("Показывать только подписанные устройства",
+                    "В списке останутся только устройства, которым вы дали имя",
+                    () => Settings.NamedOnly, v => Settings.NamedOnly = v),
+                Check("Уведомлять о подключении устройств",
+                    "Уведомление у часов, когда вставляют флешку, токен или другое устройство",
+                    () => Settings.NotifyConnected, v => Settings.NotifyConnected = v)));
+
+            _list.Controls.Add(Section("Запуск", false,
+                Check("Запускать при входе в Windows",
+                    "Задача Планировщика с правами администратора, без окна контроля учётных записей",
+                    () => Autostart.Enabled, SetAutostart),
+                Check("Запускаться в трее",
+                    "При автозапуске окно не открывается — только значок у часов",
+                    () => Settings.StartMinimized, v => Settings.StartMinimized = v)));
+
+            _list.Controls.Add(Section("Виджет на рабочем столе", true,
+                Check("Показывать виджет", "Заряд и состояние устройств поверх окон",
+                    () => Settings.WidgetVisible, v => Settings.WidgetVisible = v),
+                Check("Закрепить виджет",
+                    "Закреплённый виджет не ловит мышь: щелчки проходят сквозь него",
+                    () => Settings.WidgetLocked, v => Settings.WidgetLocked = v),
+                Choice("Что показывать", new[]
+                    {
+                        "только устройства с зарядом",
+                        "с зарядом и подписанные",
+                        "все подключённые",
+                    },
+                    () => Settings.WidgetContent, v => Settings.WidgetContent = v),
+                Button("Вернуть виджет на место", () =>
+                {
+                    Settings.WidgetPosition = new Point(
+                        Screen.PrimaryScreen.WorkingArea.Right - 300,
+                        Screen.PrimaryScreen.WorkingArea.Top + 24);
+                    Apply();
+                })));
+
+            _list.Controls.Add(Section("Внешний вид виджета", false,
+                Choice("Тема", new[] { "как в Windows", "тёмная", "светлая" },
+                    () => Settings.WidgetTheme, v => Settings.WidgetTheme = v),
+                ColorPicker(),
+                Slider("Плотность подложки", 0, 100, 5,
+                    () => Settings.WidgetBackground, v => Settings.WidgetBackground = v,
+                    v => v == 0 ? "без подложки" : v + " %"),
+                Slider("Непрозрачность", 40, 100, 5,
+                    () => Settings.WidgetOpacity, v => Settings.WidgetOpacity = v, v => v + " %")));
+
+            _list.Controls.Add(Section("Заряд устройств", false,
+                Note("Сами устройства программа не опрашивает — это будило бы беспроводные. "
+                     + "Заряд берётся из данных Windows и у программ производителей."),
+                Check("Брать заряд у Logitech G HUB", "Мыши, клавиатуры и гарнитуры Logitech, пока G HUB запущен",
+                    () => Settings.UseGHub, v => Settings.UseGHub = v),
+                Check("Брать заряд из журнала Razer Synapse", "Устройства Razer, пока Synapse запущен",
+                    () => Settings.UseSynapse, v => Settings.UseSynapse = v),
+                Slider("Обновлять заряд раз в", 1, 30, 1,
+                    () => Settings.BatteryMinutes, v => Settings.BatteryMinutes = v, Minutes)));
         }
 
         private static string Minutes(int value) =>
             value == 1 ? "1 минуту" : value < 5 ? value + " минуты" : value + " минут";
+
+        // ——— разделы ———
+
+        private Control Section(string title, bool expanded, params Control[] items)
+        {
+            var body = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(6, 4, 0, 10),
+                Visible = expanded,
+            };
+            foreach (var item in items) body.Controls.Add(item);
+
+            var header = new Label
+            {
+                Text = (expanded ? "⌄  " : "›  ") + title,
+                AutoSize = false,
+                Size = new Size(480, 34),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI Semibold", 10.5f),
+                ForeColor = Color.FromArgb(30, 41, 59),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(0, 6, 0, 0),
+            };
+            header.Click += (s, e) =>
+            {
+                body.Visible = !body.Visible;
+                header.Text = (body.Visible ? "⌄  " : "›  ") + title;
+            };
+            header.MouseEnter += (s, e) => header.BackColor = Color.FromArgb(243, 244, 246);
+            header.MouseLeave += (s, e) => header.BackColor = Color.Transparent;
+
+            var panel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0),
+                Width = 500,
+            };
+            panel.Controls.Add(header);
+            panel.Controls.Add(body);
+            return panel;
+        }
+
+        // ——— элементы ———
 
         private void SetAutostart(bool value)
         {
@@ -123,65 +192,46 @@ namespace USBofon
             _apply?.Invoke();
         }
 
-        private static Control Head(string text) => new Label
-        {
-            Text = text,
-            AutoSize = true,
-            Font = new Font("Segoe UI Semibold", 10.5f),
-            Margin = new Padding(0, 14, 0, 4),
-        };
-
         private static Control Note(string text) => new Label
         {
             Text = text,
             AutoSize = true,
-            MaximumSize = new Size(520, 0),
+            MaximumSize = new Size(470, 0),
             ForeColor = SystemColors.GrayText,
             Margin = new Padding(0, 0, 0, 6),
         };
 
         private Control Check(string text, string hint, Func<bool> read, Action<bool> write)
         {
-            var box = new CheckBox
-            {
-                Text = text,
-                AutoSize = true,
-                Checked = read(),
-                Margin = new Padding(0, 2, 0, 0),
-            };
-            box.CheckedChanged += (s, e) =>
-            {
-                write(box.Checked);
-                Apply();
-            };
-            new ToolTip().SetToolTip(box, hint);
+            var box = new CheckBox { Text = text, AutoSize = true, Checked = read(), Margin = new Padding(0, 4, 0, 0) };
+            box.CheckedChanged += (s, e) => { write(box.Checked); Apply(); };
 
-            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             panel.Controls.Add(box);
             panel.Controls.Add(new Label
             {
                 Text = hint,
                 AutoSize = true,
-                MaximumSize = new Size(520, 0),
+                MaximumSize = new Size(448, 0),
                 ForeColor = SystemColors.GrayText,
-                Margin = new Padding(20, 0, 0, 6),
+                Margin = new Padding(22, 0, 0, 8),
             });
             return panel;
         }
 
         private Control Slider(string text, int min, int max, int step, Func<int> read, Action<int> write, Func<int, string> format)
         {
-            var label = new Label { AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+            var label = new Label { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var bar = new TrackBar
             {
                 Minimum = min,
                 Maximum = max,
                 SmallChange = step,
                 LargeChange = step * 2,
-                TickFrequency = step * 5,
+                TickFrequency = Math.Max(step * 5, 1),
                 Value = Math.Min(Math.Max(read(), min), max),
-                Width = 260,
-                Margin = new Padding(0, 0, 0, 6),
+                Width = 300,
+                Margin = new Padding(0, 0, 0, 8),
             };
             label.Text = text + ": " + format(bar.Value);
             bar.ValueChanged += (s, e) =>
@@ -191,7 +241,7 @@ namespace USBofon
                 Apply();
             };
 
-            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             panel.Controls.Add(label);
             panel.Controls.Add(bar);
             return panel;
@@ -199,24 +249,74 @@ namespace USBofon
 
         private Control Choice(string text, string[] options, Func<int> read, Action<int> write)
         {
-            var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260, Margin = new Padding(0, 0, 0, 6) };
+            var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, Margin = new Padding(0, 0, 0, 8) };
             box.Items.AddRange(options);
             box.SelectedIndex = Math.Min(Math.Max(read(), 0), options.Length - 1);
-            box.SelectedIndexChanged += (s, e) =>
-            {
-                write(box.SelectedIndex);
-                Apply();
-            };
+            box.SelectedIndexChanged += (s, e) => { write(box.SelectedIndex); Apply(); };
 
-            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
-            panel.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 0, 2) });
+            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            panel.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 8, 0, 2) });
             panel.Controls.Add(box);
+            return panel;
+        }
+
+        /// <summary>Свой цвет подложки: образец, поле с кодом вида #1E2A3A и выбор из палитры.</summary>
+        private Control ColorPicker()
+        {
+            var sample = new Panel
+            {
+                Size = new Size(34, 26),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Theme.WidgetBack,
+                Margin = new Padding(0, 2, 8, 0),
+            };
+            var code = new TextBox
+            {
+                Width = 110,
+                Text = Settings.WidgetColor == 0 ? "" : Theme.ToHex(Color.FromArgb(Settings.WidgetColor)),
+                Margin = new Padding(0, 3, 8, 0),
+            };
+            var pick = new Button { Text = "Выбрать…", AutoSize = true, Margin = new Padding(0, 1, 8, 0), FlatStyle = FlatStyle.System };
+            var reset = new Button { Text = "Как в теме", AutoSize = true, Margin = new Padding(0, 1, 0, 0), FlatStyle = FlatStyle.System };
+
+            void Use(Color? color)
+            {
+                Settings.WidgetColor = color?.ToArgb() ?? 0;
+                sample.BackColor = Theme.WidgetBack;
+                code.Text = color == null ? "" : Theme.ToHex(color.Value);
+                Apply();
+            }
+
+            code.TextChanged += (s, e) =>
+            {
+                if (code.Text.Trim().Length == 0) { Use(null); return; }
+                var parsed = Theme.Parse(code.Text);
+                if (parsed != null)
+                {
+                    Settings.WidgetColor = parsed.Value.ToArgb();
+                    sample.BackColor = parsed.Value;
+                    Apply();
+                }
+            };
+            pick.Click += (s, e) =>
+            {
+                using (var dialog = new ColorDialog { Color = Theme.WidgetBack, FullOpen = true })
+                    if (dialog.ShowDialog(this) == DialogResult.OK) Use(dialog.Color);
+            };
+            reset.Click += (s, e) => Use(null);
+
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 8) };
+            row.Controls.AddRange(new Control[] { sample, code, pick, reset });
+
+            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            panel.Controls.Add(new Label { Text = "Цвет подложки", AutoSize = true, Margin = new Padding(0, 8, 0, 4) });
+            panel.Controls.Add(row);
             return panel;
         }
 
         private static Control Button(string text, Action click)
         {
-            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(0, 2, 0, 6) };
+            var button = new Button { Text = text, AutoSize = true, Margin = new Padding(0, 4, 0, 8), FlatStyle = FlatStyle.System };
             button.Click += (s, e) => click();
             return button;
         }
