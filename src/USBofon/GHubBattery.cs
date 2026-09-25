@@ -27,6 +27,8 @@ namespace USBofon
             public int? Percent;
             /// <summary>Что ответил G HUB на запрос заряда — для отчёта.</summary>
             public string Answer;
+            /// <summary>Состояние по G HUB: ACTIVE — работает, BLOCKED — выключено или уснуло.</summary>
+            public string State;
         }
 
         private static TimeSpan CacheTime => TimeSpan.FromMinutes(Settings.BatteryMinutes);
@@ -84,6 +86,16 @@ namespace USBofon
                         ? code.Groups[1].Value
                         : "без поля percentage";
 
+                // Выключенная или уснувшая гарнитура остаётся в списке G HUB (приёмник-то в USB),
+                // но с состоянием BLOCKED. Её прежний заряд не показываем: он уже неправда.
+                var stateMatch = Regex.Match(block, @"""state"":\s*""([A-Z_]+)""");
+                var deviceState = stateMatch.Success ? stateMatch.Groups[1].Value : "";
+                if (deviceState.Length > 0 && deviceState != "ACTIVE")
+                {
+                    value = null;
+                    answer = "устройство выключено (" + deviceState + ")";
+                }
+
                 // Тип и название берём из описания устройства: по ним сопоставим приёмник с его мышью.
                 var tail = block;
                 var kind = Regex.Match(tail, @"""deviceType"":\s*""([A-Z_]+)""");
@@ -95,9 +107,91 @@ namespace USBofon
                     Name = name.Success ? name.Groups[1].Value : "",
                     Percent = value,
                     Answer = answer,
+                    State = deviceState,
                 });
             }
             return result;
+        }
+
+        /// <summary>Забыть запомненный ответ: следующий опрос спросит G HUB заново.</summary>
+        public static void Invalidate() => _read = DateTime.MinValue;
+
+        /// <summary>
+        /// G HUB сообщил, что устройство включилось, выключилось или изменился заряд.
+        /// Вызывается из фонового потока.
+        /// </summary>
+        public static event Action Changed;
+
+        private static Thread _watcher;
+
+        /// <summary>
+        /// Слушать события G HUB. Гарнитура за приёмником выключается и включается без ведома
+        /// Windows: приёмник остаётся в USB, и сигнала о смене устройств нет. Раньше виджет
+        /// поэтому не замечал включённых наушников, пока не нажмёшь «Обновить». G HUB же сам
+        /// рассылает /devices/state/changed (ACTIVE ↔ BLOCKED) и /battery/state/changed —
+        /// подписываемся на них. Проверено 25.09.2026 на PRO X 2: событие приходит в ту же секунду.
+        /// </summary>
+        public static void StartWatching()
+        {
+            if (_watcher != null) return;
+            _watcher = new Thread(WatchLoop) { IsBackground = true, Name = "G HUB events" };
+            _watcher.Start();
+        }
+
+        private static void WatchLoop()
+        {
+            while (true)
+            {
+                try
+                {
+                    // G HUB может быть не запущен или выключен в настройках — ждём и пробуем снова.
+                    if (Settings.UseGHub && PortOpen()) Listen();
+                }
+                catch
+                {
+                    // Канал оборвался (G HUB закрыли или перезапустили) — переподключимся.
+                }
+                Thread.Sleep(TimeSpan.FromSeconds(10));
+            }
+        }
+
+        private static void Listen()
+        {
+            using (var socket = new ClientWebSocket())
+            {
+                socket.Options.AddSubProtocol("json");
+                using (var connect = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+                    socket.ConnectAsync(new Uri(Address), connect.Token).GetAwaiter().GetResult();
+
+                foreach (var path in new[] { "/devices/state/changed", "/battery/state/changed" })
+                {
+                    var request = Encoding.UTF8.GetBytes("{\"msgId\":\"w\",\"verb\":\"SUBSCRIBE\",\"path\":\"" + path + "\"}");
+                    socket.SendAsync(new ArraySegment<byte>(request), WebSocketMessageType.Text, true, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+
+                // Здесь читаем без срока: события приходят когда угодно, хоть через час.
+                var buffer = new byte[64 * 1024];
+                while (socket.State == WebSocketState.Open && Settings.UseGHub)
+                {
+                    var message = new System.IO.MemoryStream();
+                    while (true)
+                    {
+                        var received = socket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                        if (received.MessageType == WebSocketMessageType.Close) return;
+                        message.Write(buffer, 0, received.Count);
+                        if (received.EndOfMessage) break;
+                    }
+
+                    var text = Encoding.UTF8.GetString(message.ToArray());
+                    if (!text.Contains("\"BROADCAST\"")) continue;
+                    if (!text.Contains("/devices/state/changed") && !text.Contains("/battery/state/changed")) continue;
+
+                    Invalidate();
+                    try { Changed?.Invoke(); } catch { }
+                }
+            }
         }
 
         private static bool PortOpen()

@@ -66,6 +66,13 @@ namespace USBofon
             BuildUi();
 
             _deviceChangeTimer.Tick += (s, e) => { _deviceChangeTimer.Stop(); RefreshDevices(); };
+            // Гарнитура за приёмником включилась, уснула или разрядилась — Windows об этом молчит,
+            // а G HUB сообщает. События идут пачкой, поэтому обновляем через тот же таймер.
+            GHubBattery.Changed += () =>
+            {
+                if (!IsHandleCreated || IsDisposed) return;
+                BeginInvoke((Action)(() => { _deviceChangeTimer.Stop(); _deviceChangeTimer.Start(); }));
+            };
             BuildTray();
             ApplyTheme();
 
@@ -78,6 +85,7 @@ namespace USBofon
                 try { _store.Load(); }
                 catch (Exception ex) { ShowError("Не удалось прочитать сохранённые имена:\r\n" + _store.FilePath, ex); }
                 RefreshDevices();
+                GHubBattery.StartWatching();
                 Updater.Cleanup();
                 _ = CheckUpdates(false);
                 _updateTimer.Start();
