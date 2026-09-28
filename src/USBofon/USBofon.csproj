@@ -12,6 +12,7 @@
     <PlatformTarget>AnyCPU</PlatformTarget>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Product>USB-of_on</Product>
+    <Copyright>© 2026 AveHarrisan. Все права сохранены.</Copyright>
     <Version>2.3.0</Version>
     <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
   </PropertyGroup>

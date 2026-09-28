@@ -301,3 +301,7 @@ dotnet build src/USBofon/USBofon.csproj -c Release
 
 Нашли ошибку или хотите функцию — [заведите задачу](https://github.com/AveHarrisan/USB-of_on/issues)
 или напишите в [Discord](https://discord.com/invite/XYBvdvfv8t).
+
+## Лицензия
+
+© 2026 AveHarrisan. Все права сохранены — подробности в [LICENSE](LICENSE).

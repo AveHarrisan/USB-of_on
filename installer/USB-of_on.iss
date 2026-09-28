@@ -14,6 +14,7 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=AveHarrisan
 AppPublisherURL=https://t.me/aveharrisan
+AppCopyright=© 2026 AveHarrisan. Все права сохранены.
 AppSupportURL=https://discord.com/invite/XYBvdvfv8t
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
