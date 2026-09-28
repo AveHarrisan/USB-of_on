@@ -20,6 +20,55 @@
 [![Версия](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/AveHarrisan/USB-of_on/main/docs/badges/version.json&style=flat-square)](https://github.com/AveHarrisan/USB-of_on/releases/latest)
 [![Все файлы](https://img.shields.io/badge/Все_файлы-релизы-lightgrey?style=flat-square)](https://github.com/AveHarrisan/USB-of_on/releases)
 
+### Поддержать и найти меня
+
+<table>
+<tr>
+<td align="center" width="120">
+<a href="https://boosty.to/aveharrisan">
+<img src="docs/images/links/boosty.png" width="72" height="72" alt="Boosty"><br>
+<b>Boosty</b>
+</a><br>
+<sub>разово или подпиской</sub>
+</td>
+<td align="center" width="120">
+<a href="https://www.donationalerts.com/r/aveharrisan">
+<img src="docs/images/links/donationalerts.png" width="72" height="72" alt="DonationAlerts"><br>
+<b>DonationAlerts</b>
+</a><br>
+<sub>разовый донат</sub>
+</td>
+<td align="center" width="120">
+<a href="https://lvl.su/">
+<img src="docs/images/links/lvl.png" width="72" height="72" alt="lvl.su"><br>
+<b>lvl.su</b>
+</a><br>
+<sub>гайды и вики</sub>
+</td>
+<td align="center" width="120">
+<a href="https://t.me/kotamarine">
+<img src="docs/images/links/kotamarine.png" width="72" height="72" alt="Котамарин"><br>
+<b>Котамарин</b>
+</a><br>
+<sub>канал про игры</sub>
+</td>
+<td align="center" width="120">
+<a href="https://discord.com/invite/XYBvdvfv8t">
+<img src="docs/images/links/discord.png" width="72" height="72" alt="Discord"><br>
+<b>Discord</b>
+</a><br>
+<sub>вопросы и ошибки</sub>
+</td>
+<td align="center" width="120">
+<a href="https://t.me/aveharrisan">
+<img src="docs/images/links/aveharrisan.png" width="72" height="72" alt="AveHarrisan"><br>
+<b>AveHarrisan</b>
+</a><br>
+<sub>телеграм автора</sub>
+</td>
+</tr>
+</table>
+
 ![Главное окно](docs/images/main-light.png)
 
 </div>
@@ -204,59 +253,6 @@ Windows, G HUB и Synapse, список HID-коллекций, настройк
 Ни статистики, ни идентификаторов, ни списка устройств никуда не отправляется.
 
 </details>
-
----
-
-## Поддержать и найти меня
-
-<div align="center">
-<table>
-<tr>
-<td align="center" width="120">
-<a href="https://boosty.to/aveharrisan">
-<img src="docs/images/links/boosty.png" width="72" height="72" alt="Boosty"><br>
-<b>Boosty</b>
-</a><br>
-<sub>разово или подпиской</sub>
-</td>
-<td align="center" width="120">
-<a href="https://www.donationalerts.com/r/aveharrisan">
-<img src="docs/images/links/donationalerts.png" width="72" height="72" alt="DonationAlerts"><br>
-<b>DonationAlerts</b>
-</a><br>
-<sub>разовый донат</sub>
-</td>
-<td align="center" width="120">
-<a href="https://lvl.su/">
-<img src="docs/images/links/lvl.png" width="72" height="72" alt="lvl.su"><br>
-<b>lvl.su</b>
-</a><br>
-<sub>гайды и вики</sub>
-</td>
-<td align="center" width="120">
-<a href="https://t.me/kotamarine">
-<img src="docs/images/links/kotamarine.png" width="72" height="72" alt="Котамарин"><br>
-<b>Котамарин</b>
-</a><br>
-<sub>канал про игры</sub>
-</td>
-<td align="center" width="120">
-<a href="https://discord.com/invite/XYBvdvfv8t">
-<img src="docs/images/links/discord.png" width="72" height="72" alt="Discord"><br>
-<b>Discord</b>
-</a><br>
-<sub>вопросы и ошибки</sub>
-</td>
-<td align="center" width="120">
-<a href="https://t.me/aveharrisan">
-<img src="docs/images/links/aveharrisan.png" width="72" height="72" alt="AveHarrisan"><br>
-<b>AveHarrisan</b>
-</a><br>
-<sub>телеграм автора</sub>
-</td>
-</tr>
-</table>
-</div>
 
 ---
 
